@@ -25,12 +25,12 @@ A migração não altera os dados monetários existentes nem aprova lançamentos
 - A coluna `possible_duplicate_of` registra um vínculo manual de duplicidade potencial; a detecção automática de duplicidades ainda não está implementada.
 - O fluxo de revisão está limitado a custos manuais. A aprovação das horas de instrutores continua no módulo próprio e precisa de uma política de inclusão confirmada.
 - Ainda não há serviço de agregação financeiro conectado ao dashboard.
-- O código PHP da tela precisa de lint e teste funcional em ambiente local com a migração aplicada. Não há banco conectado neste trabalho.
+- A verificação contínua do GitHub passou: sintaxe de todos os arquivos PHP, 16 verificações do motor financeiro e validação aritmética da fixture sintética. Ainda falta teste funcional da tela em ambiente local com a migração aplicada; não há banco conectado neste trabalho.
 - A revisão dos custos não substitui a definição do rateio de despesas compartilhadas.
 
 ## Testes já realizados
-- O motor financeiro e suas 16 verificações foram executados em PHP CLI 8.4.24 em uma cópia local de verificação: sintaxe válida e 16 verificações passaram.
-- Isso valida a lógica e o teste copiados para a verificação local; não equivale a execução automatizada no GitHub nem a um teste de integração com banco.
+- A execução automatizada no GitHub Actions passou em PHP 8.2: lint de todos os arquivos PHP, `tests/test-financial-calculator.php` (16 verificações) e `tests/validate-fixture.php`.
+- A CI detectou e ajudou a corrigir uma string SQL inválida na nova tela de custos e um erro de sintaxe preexistente em `public/classes.php` (`array_push` com argumentos após unpacking).
 - A tela de custos e a migração ainda não foram testadas contra MySQL/MariaDB.
 
 ## Próximo passo
