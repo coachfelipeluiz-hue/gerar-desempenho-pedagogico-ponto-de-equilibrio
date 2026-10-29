@@ -60,6 +60,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$category) throw new RuntimeException('A categoria selecionada não está ativa.');
             $subsedeId = (int)($_POST['subsede_id'] ?? 0) ?: null;
             $poloId = (int)($_POST['polo_id'] ?? 0) ?: null;
+            $isMaster = ($user['role'] ?? '') === 'master';
+            $allowedUnits = array_map('intval', user_unit_ids($pdo));
+            if (!$isMaster && (!$subsedeId || !in_array($subsedeId, $allowedUnits, true))) {
+                throw new RuntimeException('Selecione uma subsede à qual seu usuário tenha acesso. Apenas o Master pode registrar custos institucionais sem subsede.');
+            }
             $classId = (int)($_POST['class_id'] ?? 0) ?: null;
             $notes = trim((string)($_POST['notes'] ?? ''));
             if (mb_strlen($notes) > 500) throw new RuntimeException('As observações devem ter até 500 caracteres.');
@@ -106,15 +111,27 @@ $month = (string)($_GET['competence'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) $month = date('Y-m');
 $start = $month . '-01';
 $end = date('Y-m-t', strtotime($start));
-$stmt = $pdo->prepare('SELECT ce.id, ce.amount, ce.competence, ce.notes, cc.name AS category_name, cc.cost_type, cc.attribution_level, s.name AS subsede_name, p.name AS polo_name, cl.name AS class_name
+$sql = 'SELECT ce.id, ce.amount, ce.competence, ce.notes, cc.name AS category_name, cc.cost_type, cc.attribution_level, s.name AS subsede_name, p.name AS polo_name, cl.name AS class_name
  FROM cost_entries ce
  INNER JOIN cost_categories cc ON cc.id = ce.category_id
  LEFT JOIN subsedes s ON s.id = ce.subsede_id
  LEFT JOIN polos p ON p.id = ce.polo_id
  LEFT JOIN classes cl ON cl.id = ce.class_id
- WHERE ce.competence BETWEEN ? AND ?
- ORDER BY ce.competence DESC, ce.id DESC');
-$stmt->execute([$start, $end]);
+ WHERE ce.competence BETWEEN ? AND ?';
+$params = [$start, $end];
+if (($user['role'] ?? '') !== 'master') {
+    $allowedUnits = array_map('intval', user_unit_ids($pdo));
+    if ($allowedUnits) {
+        $ph = implode(',', array_fill(0, count($allowedUnits), '?'));
+        $sql .= " AND ce.subsede_id IN ($ph)";
+        array_push($params, ...$allowedUnits);
+    } else {
+        $sql .= ' AND 1 = 0';
+    }
+}
+$sql .= ' ORDER BY ce.competence DESC, ce.id DESC';
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
 $entries = $stmt->fetchAll();
 $total = array_sum(array_map(static fn($r) => (float)$r['amount'], $entries));
 $money = static fn($v) => 'R$ ' . number_format((float)$v, 2, ',', '.');
