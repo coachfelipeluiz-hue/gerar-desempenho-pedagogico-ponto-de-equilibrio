@@ -169,6 +169,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $preflightErrors[] = 'Linha ' . $line . ': nome da turma vazio.';
                     continue;
                 }
+                $invalidRow = false;
+                foreach (['active_apprentices', 'capacity'] as $numericField) {
+                    $rawNumeric = class_value($row, $map, $numericField);
+                    if ($map[$numericField] >= 0 && $rawNumeric !== '' && class_int_value($rawNumeric) === null) {
+                        $preflightErrors[] = 'Linha ' . $line . ': valor inválido para "' . $numericField . '": "' . $rawNumeric . '". Informe um número inteiro ou deixe vazio.';
+                        $invalidRow = true;
+                    }
+                }
+                $rawCompetence = class_value($row, $map, 'competence');
+                if ($map['competence'] >= 0 && $rawCompetence !== '' && class_date_value($rawCompetence) === null) {
+                    $preflightErrors[] = 'Linha ' . $line . ': data/competência inválida: "' . $rawCompetence . '". Formatos aceitos: AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA ou MM/AAAA.';
+                    $invalidRow = true;
+                }
+                if ($invalidRow) continue;
                 $code = class_value($row, $map, 'source_code');
                 if ($code !== '') {
                     $key = mb_strtolower($code, 'UTF-8');
