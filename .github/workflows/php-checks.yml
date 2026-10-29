@@ -32,5 +32,8 @@ jobs:
       - name: Run financial calculator tests
         run: php tests/test-financial-calculator.php
 
+      - name: Run class CSV importer tests
+        run: php tests/test-class-csv-import.php
+
       - name: Validate synthetic fixture arithmetic
         run: php tests/validate-fixture.php
