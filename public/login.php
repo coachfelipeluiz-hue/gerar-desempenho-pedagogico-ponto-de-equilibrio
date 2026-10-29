@@ -14,6 +14,7 @@ if (current_user()) {
 require __DIR__ . '/../app/layout.php';
 
 $error = '';
+$csrfLogin = csrf_token_value('csrf_login');
 
 $script = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
 $publicPos = strpos($script, '/public/');
@@ -21,7 +22,9 @@ $base = $publicPos !== false
     ? substr($script, 0, $publicPos) . '/public'
     : '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_token_matches('csrf_login', $_POST['csrf_token'] ?? null)) {
+    $error = 'A sessão do formulário expirou. Atualize a página e tente novamente.';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim((string)($_POST['email'] ?? ''));
     $password = (string)($_POST['password'] ?? '');
 
@@ -48,6 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
 
             if (refresh_current_user($pdo)) {
+                unset($_SESSION['csrf_login']);
                 audit($pdo, (int)$user['id'], 'login', 'user', (int)$user['id']);
                 header('Location: ' . $base . '/index.php');
                 exit;
@@ -62,6 +66,7 @@ page_header('Entrar');
 ?>
 
 <form class="panel form" method="post">
+    <input type="hidden" name="csrf_token" value="<?= e($csrfLogin) ?>">
     <?php if ($error): ?>
         <div class="error"><?= e($error) ?></div>
     <?php endif; ?>

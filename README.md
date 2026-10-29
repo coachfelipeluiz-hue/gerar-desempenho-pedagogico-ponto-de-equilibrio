@@ -22,6 +22,8 @@ Primeira base funcional em PHP + MySQL. Inclui login com sessão, estrutura de a
 - Não use credenciais reais no GitHub.
 - Não exponha `config/`, `database/` ou `storage/` no servidor público.
 - Altere imediatamente a senha inicial e use HTTPS em produção.
+- Login e logout usam token CSRF; logout aceita somente POST.
+- IDs de usuário enviados por formulário aceitam apenas inteiros não negativos; novos usuários ainda exigem senha mínima.
 - Cada requisição protegida revalida no banco se o usuário continua ativo e recarrega perfil e permissões; usuários desativados perdem a sessão.
 - Ações de instrutores exigem a permissão correspondente de criar/editar e validam a unidade de origem/destino e o histórico da turma; aprovar horas permanece exclusivo do Master.
 - O resumo de instrutores separa custo aprovado, considerado no dashboard, de custo pendente de aprovação.
@@ -53,6 +55,8 @@ php tests/authorization_policy.php
 php tests/instructor_cost_totals.php
 php tests/contract_import_parsing.php
 php tests/class_import_fields.php
+php tests/csrf_policy.php
+php tests/user_id_validation.php
 ```
 
 Os testes usam somente dados sintéticos; `authorization_policy.php` requer `pdo_sqlite`. Eles não conectam a um banco da aplicação nem usam dados reais.

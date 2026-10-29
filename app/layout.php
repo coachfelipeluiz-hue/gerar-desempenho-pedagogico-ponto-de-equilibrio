@@ -4,6 +4,7 @@
 function page_header(string $title): void {
     $user = current_user();
     $base = app_base_path();
+    $csrfLogout = $user ? csrf_token_value('csrf_logout') : '';
     ?>
     <!doctype html>
     <html lang="pt-BR">
@@ -21,6 +22,9 @@ function page_header(string $title): void {
             .nav-submenu { position: absolute; top: 100%; left: 0; z-index: 1000; min-width: 190px; display: flex; flex-direction: column; gap: 0.15rem; padding: 0.45rem; background: #fff; border: 1px solid #d9dee7; border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
             .nav-submenu a { display: block; padding: 0.55rem 0.7rem; white-space: nowrap; text-decoration: none; border-radius: 4px; }
             .nav-submenu a:hover { background: #f1f4f8; }
+            .userbox form { margin: 0; }
+            .userbox button.logout-link { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; }
+            .userbox button.logout-link:hover { background: transparent; color: #dbe7e3; }
             @media (max-width: 700px) {
                 .nav-menu { display: block; }
                 .nav-submenu { position: static; box-shadow: none; margin: 0.3rem 0 0.5rem 0.5rem; }
@@ -37,7 +41,10 @@ function page_header(string $title): void {
             <?php if ($user): ?>
                 <div class="userbox">
                     <span><?= e($user['name']) ?> · <?= e($user['role']) ?></span>
-                    <a href="<?= e($base) ?>/logout.php">Sair</a>
+                    <form method="post" action="<?= e($base) ?>/logout.php">
+                        <input type="hidden" name="csrf_token" value="<?= e($csrfLogout) ?>">
+                        <button class="logout-link" type="submit">Sair</button>
+                    </form>
                 </div>
             <?php endif; ?>
         </header>

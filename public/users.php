@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $action = (string)($_POST['action'] ?? '');
         if ($action === 'save_user') {
-            $id = (int)($_POST['user_id'] ?? 0);
+            $id = parse_nonnegative_id($_POST['user_id'] ?? '0');
             $name = trim((string)($_POST['name'] ?? ''));
             $email = strtolower(trim((string)($_POST['email'] ?? '')));
             $role = (string)($_POST['role'] ?? 'consulta');

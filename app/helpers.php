@@ -10,6 +10,48 @@ function current_user(): ?array {
     return is_array($user) ? $user : null;
 }
 
+function csrf_token_value(string $sessionKey): string {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+
+    $token = $_SESSION[$sessionKey] ?? null;
+    if (!is_string($token) || !preg_match('/\A[a-f0-9]{64}\z/', $token)) {
+        $token = bin2hex(random_bytes(32));
+        $_SESSION[$sessionKey] = $token;
+    }
+
+    return $token;
+}
+
+function csrf_token_matches(string $sessionKey, mixed $submitted): bool {
+    $expected = $_SESSION[$sessionKey] ?? null;
+    return is_string($expected)
+        && preg_match('/\A[a-f0-9]{64}\z/', $expected) === 1
+        && is_string($submitted)
+        && hash_equals($expected, $submitted);
+}
+
+function parse_nonnegative_id(mixed $value): int {
+    if (!is_string($value) && !is_int($value)) {
+        throw new RuntimeException('Identificador inválido.');
+    }
+
+    $raw = (string)$value;
+    if (!preg_match('/\A\d+\z/', $raw)) {
+        throw new RuntimeException('Identificador inválido.');
+    }
+
+    $canonical = ltrim($raw, '0');
+    $canonical = $canonical === '' ? '0' : $canonical;
+    $id = filter_var($canonical, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+    if ($id === false) {
+        throw new RuntimeException('Identificador inválido.');
+    }
+
+    return $id;
+}
+
 function app_base_path(): string {
     $script = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $publicPos = strpos($script, '/public/');
