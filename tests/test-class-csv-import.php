@@ -47,6 +47,16 @@ $assertNull('rejeitar data impossível', class_date_value('31/02/2026'));
 $assertSame('ler campo mapeado', 'Turma A', class_value(['1','Turma A'], ['name'=>1], 'name'));
 $assertSame('campo sem mapeamento fica vazio', '', class_value(['1','Turma A'], ['name'=>-1], 'name'));
 
+$duplicateHeaderRejected = false;
+try { $readCsv("codigo,Código,nome\n1,2,Turma A\n"); }
+catch (RuntimeException $e) { $duplicateHeaderRejected = str_contains($e->getMessage(), 'colunas duplicadas'); }
+$assertSame('rejeitar cabeçalhos duplicados após normalização', true, $duplicateHeaderRejected);
+
+$blankHeaderRejected = false;
+try { $readCsv("codigo,,nome\n1,2,Turma A\n"); }
+catch (RuntimeException $e) { $blankHeaderRejected = str_contains($e->getMessage(), 'coluna sem nome'); }
+$assertSame('rejeitar cabeçalho sem nome', true, $blankHeaderRejected);
+
 if ($failures !== []) {
     fwrite(STDERR, implode(PHP_EOL, $failures) . PHP_EOL);
     exit(1);
