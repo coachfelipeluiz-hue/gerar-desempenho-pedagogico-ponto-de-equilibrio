@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/Finance/BreakEvenCalculator.php';
 
-use Gerar\\Finance\\BreakEvenCalculator;
+use Gerar\Finance\BreakEvenCalculator;
 
 $checks = 0;
 $failures = [];
