@@ -44,3 +44,15 @@ Primeira base funcional em PHP + MySQL. Inclui login com sessão, estrutura de a
 3. Criar CRUD de subsedes/polos e histórico de vínculo.
 4. Completar testes de autorização e dashboards por unidade.
 5. Implementar cálculos do ponto de equilíbrio e simulador, comparando com a planilha de referência.
+
+## Testes locais
+Execute com PHP CLI:
+
+```sh
+php tests/authorization_policy.php
+php tests/instructor_cost_totals.php
+php tests/contract_import_parsing.php
+php tests/class_import_fields.php
+```
+
+Os testes usam somente dados sintéticos; `authorization_policy.php` requer `pdo_sqlite`. Eles não conectam a um banco da aplicação nem usam dados reais.

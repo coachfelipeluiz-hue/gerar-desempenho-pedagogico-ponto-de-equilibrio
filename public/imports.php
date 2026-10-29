@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/import_contracts.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
 if (!is_master_user()) {
@@ -14,49 +15,6 @@ $errors = [];
 $preview = null;
 $uploadDir = dirname(__DIR__) . '/storage/uploads';
 if (!is_dir($uploadDir)) @mkdir($uploadDir, 0770, true);
-
-function import_csv_rows(string $path): Generator {
-    $fh = fopen($path, 'rb');
-    if (!$fh) throw new RuntimeException('Não foi possível ler o arquivo enviado.');
-    $header = fgetcsv($fh, 0, ',', '"', '\\');
-    if (!$header) { fclose($fh); throw new RuntimeException('O CSV está vazio ou não pôde ser lido.'); }
-    $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$header[0]);
-    $header = array_map(static fn($v) => trim((string)$v), $header);
-    $line = 1;
-    while (($row = fgetcsv($fh, 0, ',', '"', '\\')) !== false) {
-        $line++;
-        if (count($row) === 1 && trim((string)$row[0]) === '') continue;
-        yield [$line, $header, $row];
-    }
-    fclose($fh);
-}
-function money_to_float(mixed $value): float {
-    $v = trim((string)$value);
-    if ($v === '') return 0.0;
-    $v = str_replace(['R$', "\xc2\xa0", ' '], '', $v);
-    if (str_contains($v, ',') && str_contains($v, '.')) $v = str_replace('.', '', $v);
-    $v = str_replace(',', '.', $v);
-    return is_numeric($v) ? (float)$v : NAN;
-}
-function date_or_null(mixed $value): ?string {
-    $v = trim((string)$value);
-    if ($v === '' || $v === '0000-00-00') return null;
-    foreach (['Y-m-d', 'd/m/Y', 'd-m-Y'] as $format) {
-        $d = DateTimeImmutable::createFromFormat('!' . $format, $v);
-        if ($d && $d->format($format) === $v) return $d->format('Y-m-d');
-    }
-    return null;
-}
-function contract_csv_map(array $header): array {
-    $required = ['2 Contrato', '8 Subsede', '9 Subsede', '10 Polo (Local Curso)', '12 Empresa', '15 Dt Inicio Ctr', '16 Dt Final Ctr', '17 Desligado', '18 Desligado', '19 $ Mensal'];
-    $map = [];
-    foreach ($required as $name) {
-        $idx = array_search($name, $header, true);
-        if ($idx === false) throw new RuntimeException('Cabeçalho obrigatório não encontrado: ' . $name);
-        $map[$name] = $idx;
-    }
-    return $map;
-}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!hash_equals($csrf, (string)($_POST['csrf'] ?? ''))) {
@@ -112,12 +70,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $historyCurrent = $pdo->prepare('SELECT id, subsede_id, valid_from FROM polo_subsede_history WHERE polo_id = ? AND valid_until IS NULL ORDER BY valid_from DESC, id DESC LIMIT 1');
                 $historyClose = $pdo->prepare('UPDATE polo_subsede_history SET valid_until = DATE_SUB(?, INTERVAL 1 DAY) WHERE id = ?');
                 $historyInsert = $pdo->prepare('INSERT INTO polo_subsede_history (polo_id, subsede_id, valid_from, created_by) VALUES (?, ?, ?, ?)');
-                $contractSelect = $pdo->prepare('SELECT id FROM contracts WHERE source_code = ? LIMIT 1');
+                $contractSelect = $pdo->prepare('SELECT id FROM contracts WHERE source_code = ?');
                 $contractUpdate = $pdo->prepare('UPDATE contracts SET subsede_id=?,polo_id=?,customer_name=?,monthly_value=?,start_date=?,end_date=?,status=?,imported_batch_id=? WHERE id=?');
                 $contractInsert = $pdo->prepare('INSERT INTO contracts (source_code,subsede_id,polo_id,customer_name,monthly_value,start_date,end_date,status,imported_batch_id) VALUES (?,?,?,?,?,?,?,?,?)');
-                $count = 0; $skipped = 0; $headerSeen = false; $map = [];
-                foreach (import_csv_rows($pending['path']) as [$line, $header, $row]) {
-                    if (!$headerSeen) { $map = contract_csv_map($header); $headerSeen = true; continue; }
+                $count = 0; $skipped = 0; $seenContractCodes = [];
+                foreach (contract_csv_import_rows($pending['path']) as [$line, $map, $row]) {
                     $code = trim((string)($row[$map['2 Contrato']] ?? ''));
                     $subCode = trim((string)($row[$map['8 Subsede']] ?? ''));
                     $subName = trim((string)($row[$map['9 Subsede']] ?? ''));
@@ -125,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $company = trim((string)($row[$map['12 Empresa']] ?? ''));
                     $monthly = money_to_float($row[$map['19 $ Mensal']] ?? '');
                     if ($code === '' || $subName === '' || !is_finite($monthly) || $monthly < 0) { $skipped++; continue; }
+                    assert_unique_contract_code($code, $seenContractCodes);
                     $subSelect->execute([$subCode]); $subId = $subSelect->fetchColumn();
                     if ($subId) { $subUpdate->execute([$subName,(int)$subId]); }
                     else { $subInsert->execute([$subName,$subCode !== '' ? $subCode : null]); $subId = $pdo->lastInsertId(); }
@@ -150,7 +108,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $disabled = mb_strtolower(trim((string)($row[$map['17 Desligado']] ?? '')), 'UTF-8');
                     $status = ($disabled === 'sim' || $disabled === 'yes') ? 'Desligado' : 'Ativo';
-                    $contractSelect->execute([$code]); $existingId = $contractSelect->fetchColumn();
+                    $contractSelect->execute([$code]);
+                    $existingContracts = $contractSelect->fetchAll();
+                    if (count($existingContracts) > 1) throw new RuntimeException('O número de contrato já identifica mais de um registro no banco. Corrija a duplicidade antes de importar.');
+                    $existingId = $existingContracts[0]['id'] ?? null;
                     if ($existingId) $contractUpdate->execute([(int)$subId, $poloId ? (int)$poloId : null, $company, $monthly, $start, $end, $status, $batchId, (int)$existingId]);
                     else $contractInsert->execute([$code,(int)$subId,$poloId ? (int)$poloId : null,$company,$monthly,$start,$end,$status,$batchId]);
                     $count++;

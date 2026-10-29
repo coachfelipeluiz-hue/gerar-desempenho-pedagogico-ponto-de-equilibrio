@@ -2,8 +2,10 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/import_class_fields.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
+$user = current_user();
 if (!is_master_user()) {
     http_response_code(403);
     page_header('Acesso negado');
@@ -62,13 +64,6 @@ function class_header_guess(array $header, array $aliases): string {
         foreach ($aliases as $alias) if ($alias !== '' && str_contains($n, $alias)) return $h;
     }
     return '';
-}
-function class_int_value(mixed $v): ?int {
-    $s = trim((string)$v);
-    if ($s === '') return null;
-    $s = preg_replace('/[^0-9-]/', '', $s);
-    if ($s === '' || !preg_match('/^-?\d+$/', $s)) return null;
-    return max(0, min(1000000, (int)$s));
 }
 function class_date_value(mixed $v): ?string {
     $s = trim((string)$v);
@@ -129,13 +124,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $histFind = $pdo->prepare('SELECT id, subsede_id, valid_from FROM polo_subsede_history WHERE polo_id = ? AND valid_until IS NULL ORDER BY valid_from DESC LIMIT 1');
             $histClose = $pdo->prepare('UPDATE polo_subsede_history SET valid_until = ? WHERE id = ?');
             $histAdd = $pdo->prepare('INSERT INTO polo_subsede_history (polo_id, subsede_id, valid_from, created_by) VALUES (?,?,?,?)');
-            $classFindCode = $pdo->prepare('SELECT id FROM classes WHERE source_code = ? LIMIT 1');
-            $classFindName = $pdo->prepare('SELECT id FROM classes WHERE name = ? AND (polo_id <=> ?) LIMIT 1');
-            $classUpdate = $pdo->prepare('UPDATE classes SET name=?, group_id=?, polo_id=?, course_name=?, active_apprentices=?, capacity=?, status=?, competence=?, imported_batch_id=? WHERE id=?');
+            $classColumns = 'id, source_code, group_id, polo_id, course_name, active_apprentices, capacity, status, competence';
+            $classFindCode = $pdo->prepare("SELECT {$classColumns} FROM classes WHERE source_code = ?");
+            $classFindName = $pdo->prepare("SELECT {$classColumns} FROM classes WHERE name = ? AND (polo_id <=> ?)");
+            $classFindNameOnly = $pdo->prepare("SELECT {$classColumns} FROM classes WHERE name = ?");
+            $classUpdate = $pdo->prepare('UPDATE classes SET source_code=?, name=?, group_id=?, polo_id=?, course_name=?, active_apprentices=?, capacity=?, status=?, competence=?, imported_batch_id=? WHERE id=?');
             $classInsert = $pdo->prepare('INSERT INTO classes (source_code,name,group_id,polo_id,course_name,active_apprentices,capacity,status,competence,imported_batch_id) VALUES (?,?,?,?,?,?,?,?,?,?)');
             $groupFind = $pdo->prepare('SELECT id FROM groups_catalog WHERE name = ? LIMIT 1');
             $groupAdd = $pdo->prepare('INSERT INTO groups_catalog (name, active) VALUES (?,1)');
-            $imported = 0; $skipped = 0; $seen = [];
+            $imported = 0; $skipped = 0; $seen = []; $seenIds = [];
             foreach ($parsed['rows'] as $item) {
                 $row = $item['values'];
                 $name = class_value($row,$map,'name');
@@ -144,10 +141,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $course = class_value($row,$map,'course_name');
                 $subName = class_value($row,$map,'subsede');
                 $poloName = class_value($row,$map,'polo');
-                $apprentices = class_int_value(class_value($row,$map,'active_apprentices')) ?? 0;
-                $capacity = class_int_value(class_value($row,$map,'capacity'));
+                $apprenticesRaw = class_value($row,$map,'active_apprentices');
+                $apprentices = class_int_value($apprenticesRaw);
+                if ($apprenticesRaw !== '' && $apprentices === null) throw new RuntimeException('Quantidade de aprendizes inválida na linha ' . $item['line'] . '.');
+                $capacityRaw = class_value($row,$map,'capacity');
+                $capacity = class_int_value($capacityRaw);
+                if ($capacityRaw !== '' && $capacity === null) throw new RuntimeException('Capacidade inválida na linha ' . $item['line'] . '.');
                 $status = class_value($row,$map,'status');
-                $competence = class_date_value(class_value($row,$map,'competence'));
+                $competenceRaw = class_value($row,$map,'competence');
+                $competence = class_date_value($competenceRaw);
+                if ($competenceRaw !== '' && $competence === null) throw new RuntimeException('Competência/data inválida na linha ' . $item['line'] . '.');
                 $subId = null; $poloId = null;
                 if ($subName !== '') {
                     $subFind->execute([$subName]); $subId = $subFind->fetchColumn();
@@ -168,19 +171,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 }
+                $identity = class_import_identity_key($code, $name, ($map['polo'] >= 0 && $poloName !== '') ? (int)$poloId : null);
+                if (isset($seen[$identity])) throw new RuntimeException('A linha ' . $item['line'] . ' repete uma turma já presente neste CSV. Nenhuma alteração foi gravada.');
+                $seen[$identity] = true;
+
+                $existing = null;
+                if ($code !== '') {
+                    $classFindCode->execute([$code]);
+                    $matches = $classFindCode->fetchAll();
+                    if (count($matches) > 1) throw new RuntimeException('O código de origem ' . $code . ' identifica mais de uma turma no banco. Corrija a duplicidade antes de importar.');
+                    $existing = $matches[0] ?? null;
+                }
+                if (!$existing && $map['polo'] >= 0 && $poloName !== '') {
+                    $classFindName->execute([$name, (int)$poloId]);
+                    $matches = $classFindName->fetchAll();
+                    if (count($matches) > 1) throw new RuntimeException('O nome e polo da linha ' . $item['line'] . ' correspondem a mais de uma turma no banco.');
+                    $existing = $matches[0] ?? null;
+                }
+                if (!$existing && ($map['polo'] < 0 || $poloName === '')) {
+                    $classFindNameOnly->execute([$name]);
+                    $matches = $classFindNameOnly->fetchAll();
+                    if (count($matches) > 1) throw new RuntimeException('O nome da linha ' . $item['line'] . ' é ambíguo. Mapeie código de origem ou polo para identificar a turma.');
+                    $existing = $matches[0] ?? null;
+                }
+                $existingId = $existing ? (int)$existing['id'] : null;
+                if ($existing && $code !== '' && trim((string)($existing['source_code'] ?? '')) !== ''
+                    && mb_strtolower(trim((string)$existing['source_code']), 'UTF-8') !== mb_strtolower(trim($code), 'UTF-8')) {
+                    throw new RuntimeException('A linha ' . $item['line'] . ' corresponde a uma turma com outro código de origem. Resolva a identidade antes de importar.');
+                }
+                if ($existingId !== null && isset($seenIds[$existingId])) {
+                    throw new RuntimeException('Duas linhas do CSV apontam para a mesma turma existente. Nenhuma alteração foi gravada.');
+                }
+                if ($existingId !== null) $seenIds[$existingId] = true;
+
                 $groupId = null;
                 if ($course !== '') {
                     $groupFind->execute([$course]); $groupId = $groupFind->fetchColumn();
                     if (!$groupId) { $groupAdd->execute([$course]); $groupId = (int)$pdo->lastInsertId(); }
                     else $groupId = (int)$groupId;
                 }
-                $existingId = false;
-                if ($code !== '') { $classFindCode->execute([$code]); $existingId = $classFindCode->fetchColumn(); }
-                if (!$existingId) { $classFindName->execute([$name,$poloId]); $existingId = $classFindName->fetchColumn(); }
+                $values = merge_class_import_fields($existing, [
+                    'source_code' => $code !== '' ? $code : null,
+                    'name' => $name,
+                    'group_id' => $groupId,
+                    'polo_id' => ($map['polo'] >= 0 && $poloName !== '') ? (int)$poloId : null,
+                    'course_name' => $course !== '' ? $course : null,
+                    'active_apprentices' => $apprentices,
+                    'capacity' => $capacity,
+                    'status' => $status !== '' ? $status : null,
+                    'competence' => $competence,
+                ]);
                 if ($existingId) {
-                    $classUpdate->execute([$name,$groupId,$poloId,$course !== '' ? $course : null,$apprentices,$capacity,$status !== '' ? $status : null,$competence,$batchId,(int)$existingId]);
+                    $classUpdate->execute([$values['source_code'],$values['name'],$values['group_id'],$values['polo_id'],$values['course_name'],$values['active_apprentices'],$values['capacity'],$values['status'],$values['competence'],$batchId,$existingId]);
                 } else {
-                    $classInsert->execute([$code !== '' ? $code : null,$name,$groupId,$poloId,$course !== '' ? $course : null,$apprentices,$capacity,$status !== '' ? $status : null,$competence,$batchId]);
+                    $classInsert->execute([$values['source_code'],$values['name'],$values['group_id'],$values['polo_id'],$values['course_name'],$values['active_apprentices'],$values['capacity'],$values['status'],$values['competence'],$batchId]);
+                    $createdId = (int)$pdo->lastInsertId();
+                    if ($createdId > 0) $seenIds[$createdId] = true;
                 }
                 $imported++;
             }
@@ -218,7 +264,7 @@ page_header('Importação de turmas');
 ?>
 <?php foreach ($messages as $m): ?><div class="notice"><strong>Sucesso:</strong> <?= e($m) ?></div><?php endforeach; ?>
 <?php foreach ($errors as $m): ?><div class="error"><?= e($m) ?></div><?php endforeach; ?>
-<div class="notice"><strong>Importação com mapeamento manual.</strong> A tela não presume o significado das colunas. Confira cada campo antes de confirmar. Campos numéricos que não forem mapeados ficam com zero ou vazios; turmas existentes serão atualizadas pelo código de origem ou, na ausência dele, pelo nome e polo.</div>
+<div class="notice"><strong>Importação com mapeamento manual.</strong> A tela não presume o significado das colunas. Confira cada campo antes de confirmar. Em turmas existentes, campos não mapeados ou vazios são preservados. Para novas turmas, aprendizes sem valor começam em zero e outros campos opcionais ficam vazios. Duplicatas ou nomes ambíguos cancelam a importação, sem gravar alterações.</div>
 <section class="panel">
 <h2>1. Enviar CSV de turmas</h2>
 <p class="muted">Aceita CSV separado por vírgula, ponto e vírgula ou tabulação. Limite de 25 MB. O arquivo é lido para prévia e só grava no banco após confirmação.</p>
