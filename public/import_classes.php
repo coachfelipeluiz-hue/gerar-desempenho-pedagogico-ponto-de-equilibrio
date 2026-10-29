@@ -153,6 +153,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $preflightErrors = [];
             $seenCodes = [];
             $seenIdentities = [];
+            // Verifica ambiguidades no banco existente antes de abrir a transação.
+            $existingCodeCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE source_code = ?');
+            $existingIdentityCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE name = ? AND (polo_id <=> ?)');
+            $existingPoloId = $pdo->prepare('SELECT id FROM polos WHERE name = ? ORDER BY id');
             foreach ($parsed['rows'] as $item) {
                 $row = $item['values'];
                 $line = (int)$item['line'];
@@ -175,6 +179,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $identity = mb_strtolower(trim($name), 'UTF-8') . '|' . $polo;
                     if (isset($seenIdentities[$identity])) $preflightErrors[] = 'Linha ' . $line . ': nome e polo repetidos sem código de origem (também na linha ' . $seenIdentities[$identity] . ').';
                     else $seenIdentities[$identity] = $line;
+                }
+
+                // Não escolhe arbitrariamente entre vários registros já existentes.
+                if ($code !== '') {
+                    $existingCodeCount->execute([$code]);
+                    $codeMatches = (int)$existingCodeCount->fetchColumn();
+                    if ($codeMatches > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': o código ' . $code . ' corresponde a ' . $codeMatches . ' turmas já cadastradas. Corrija a base antes de importar.';
+                        continue;
+                    }
+                }
+                $poloNameForMatch = class_value($row, $map, 'polo');
+                $poloIdForMatch = null;
+                if ($poloNameForMatch !== '') {
+                    $existingPoloId->execute([$poloNameForMatch]);
+                    $poloMatches = $existingPoloId->fetchAll(PDO::FETCH_COLUMN);
+                    if (count($poloMatches) > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': o polo "' . $poloNameForMatch . '" corresponde a vários polos cadastrados; não é seguro identificar a turma.';
+                        continue;
+                    }
+                    if (count($poloMatches) === 1) $poloIdForMatch = (int)$poloMatches[0];
+                }
+                // A lógica atual procura por nome+polo quando o código não encontra registro.
+                $shouldFallbackToIdentity = $code === '';
+                if (!$shouldFallbackToIdentity) {
+                    $existingCodeCount->execute([$code]);
+                    $shouldFallbackToIdentity = (int)$existingCodeCount->fetchColumn() === 0;
+                }
+                if ($shouldFallbackToIdentity) {
+                    $existingIdentityCount->execute([$name, $poloIdForMatch]);
+                    $identityMatches = (int)$existingIdentityCount->fetchColumn();
+                    if ($identityMatches > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': nome "' . $name . '" e polo "' . $poloNameForMatch . '" correspondem a ' . $identityMatches . ' turmas já cadastradas. Nenhuma delas será atualizada automaticamente.';
+                    }
                 }
             }
             if ($preflightErrors) {
