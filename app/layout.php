@@ -32,6 +32,7 @@ function page_header(string $title): void {
             <nav class="nav">
                 <a href="<?= e($base) ?>/index.php">Visão geral</a>
                 <a href="<?= e($base) ?>/imports.php">Importações</a>
+                <a href="<?= e($base) ?>/import_classes.php">Importar turmas</a>
                 <a href="<?= e($base) ?>/units.php">Subsedes e polos</a>
                 <a href="<?= e($base) ?>/users.php">Usuários</a>
                 <a href="<?= e($base) ?>/costs.php">Custos</a>
