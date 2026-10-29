@@ -43,7 +43,12 @@ Status: especificação inicial aprovada pelo responsável para orientar impleme
 6. Receita R$10.000 e custo variável R$6.000: MC R$4.000 e MC% 40%; custos fixos não são subtraídos da margem de contribuição.
 7. Capacidade 100 e jovens 112: ocupação 112%, excesso 12; manter registros e sinalizar capacidade excedida.
 8. Contrato sem associação histórica válida: receita fica em pendência de atribuição.
-9. Subsede A: receita R$10.000/custos R$7.000/resultado R$3.000. Subsede B: receita R$8.000/custos R$9.500/resultado -R$1.500. Consolidado: receita R$18.000/custos R$16.500/resultado R$1.500, desde que custos não duplicados.
+9. **Cenário aritmético independente (não derivado do dataset principal):** Subsede A: receita R$10.000/custos R$7.000/resultado R$3.000. Subsede B: receita R$8.000/custos R$9.500/resultado -R$1.500. Consolidado: receita R$18.000/custos R$16.500/resultado R$1.500, desde que custos não duplicados.
+
+## Validação aritmética da fixture
+- `expected_results.dataset_checks` contém resultados derivados dos registros reais desta fixture sintética. Os cinco contratos somam R$1.500 em valores mensais integrais; quatro registros têm turma e polo atribuídos e somam R$1.220? **Atenção: a soma atribuída deve ser calculada a partir dos registros e não presumida; a validação automatizada é a fonte de conferência.** Receita integral por competência considera todos os registros, inclusive os sem atribuição, que devem continuar sinalizados como pendência.
+- `expected_results.independent_scenarios` contém exemplos didáticos isolados (média, margem de contribuição e consolidado) e não deve ser comparado com os arrays `contracts`, `instructor_costs` ou `costs`.
+- `expected_results.arithmetic_validation` documenta as fórmulas. O JSON deve passar por parse e por validação aritmética; isso não substitui testes da aplicação PHP, banco ou navegador.
 
 ## Divisão de trabalho proposta
 ### GPT (esta branch)
