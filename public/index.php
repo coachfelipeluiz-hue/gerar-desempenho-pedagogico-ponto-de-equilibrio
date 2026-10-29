@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/finance.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
 if (!can_access_module('dashboard')) {
@@ -25,6 +26,13 @@ $month = (string)($_GET['competence'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) {
     $month = date('Y-m');
 }
+$targetMarginRaw = $_GET['target_margin_pct'] ?? '0';
+$targetMarginInvalid = !is_string($targetMarginRaw)
+    || !is_numeric($targetMarginRaw)
+    || !is_finite((float)$targetMarginRaw)
+    || (float)$targetMarginRaw < 0
+    || (float)$targetMarginRaw >= 100;
+$targetMarginPercent = $targetMarginInvalid ? 0.0 : (float)$targetMarginRaw;
 $monthStart = $month . '-01';
 $monthEnd = date('Y-m-t', strtotime($monthStart));
 $isMaster = ($user['role'] ?? '') === 'master';
@@ -162,7 +170,8 @@ $stmt->execute($hoursParams);
 $approvedInstructionCosts = (float)$stmt->fetchColumn();
 $knownCosts = $directCosts + $approvedInstructionCosts;
 $revenue = (float)$contractMetrics['revenue'];
-$result = $revenue - $knownCosts;
+$projection = financial_projection($revenue, $knownCosts, $targetMarginPercent, $contractMetrics['contract_count']);
+$result = $projection['operating_result'];
 $average = (int)$classMetrics['class_count'] > 0 ? (int)$classMetrics['apprentices'] / (int)$classMetrics['class_count'] : 0;
 
 $money = static fn($value) => 'R$ ' . number_format((float)$value, 2, ',', '.');
@@ -194,6 +203,9 @@ page_header('Visão geral');
                 <?php endforeach; ?>
             </select>
         </label>
+        <label>Margem-alvo para simulação (%)
+            <input type="number" name="target_margin_pct" min="0" max="99.9" step="0.1" value="<?= e(number_format($targetMarginPercent, 1, '.', '')) ?>">
+        </label>
         <div style="align-self:end"><button type="submit">Aplicar filtros</button></div>
     </div>
 </form>
@@ -207,7 +219,13 @@ page_header('Visão geral');
     <article class="card"><span>Receita mensal contratual</span><strong><?= e($money($revenue)) ?></strong><small><?= (int)$contractMetrics['contract_count'] ?> contratos vigentes na competência</small></article>
     <article class="card"><span>Custos conhecidos</span><strong><?= e($money($knownCosts)) ?></strong><small>Custos cadastrados + horas de instrução aprovadas</small></article>
     <article class="card"><span>Saldo preliminar</span><strong><?= e($money($result)) ?></strong><small>Receita contratual menos custos conhecidos; não é lucro contábil</small></article>
+    <article class="card"><span>Margem preliminar sobre receita</span><strong><?= $projection['current_margin_percent'] === null ? '—' : number_format($projection['current_margin_percent'], 1, ',', '.') . '%' ?></strong><small>Saldo preliminar ÷ receita contratual</small></article>
+    <article class="card"><span>Ticket mensal médio por contrato</span><strong><?= $projection['average_revenue_per_contract'] === null ? '—' : e($money($projection['average_revenue_per_contract'])) ?></strong><small>Receita ÷ contratos vigentes no grupo filtrado</small></article>
+    <article class="card"><span>Receita necessária para margem-alvo</span><strong><?= e($money($projection['required_revenue'])) ?></strong><small>Meta selecionada: <?= number_format($targetMarginPercent, 1, ',', '.') ?>%</small></article>
+    <article class="card"><span>Contratos adicionais estimados</span><strong><?= $projection['additional_contracts'] === null ? '—' : number_format($projection['additional_contracts'], 0, ',', '.') ?></strong><small>Lacuna de receita ÷ média por contrato vigente</small></article>
 </section>
+
+<?php if ($targetMarginInvalid): ?><div class="error">A margem-alvo informada é inválida. A simulação foi redefinida para 0%.</div><?php endif; ?>
 
 <section class="panel">
     <h2>Como interpretar este painel</h2>
@@ -215,6 +233,8 @@ page_header('Visão geral');
         <li>Os indicadores de turma dependem de registros na tabela de turmas com a competência preenchida.</li>
         <li>A receita soma contratos com datas vigentes no período e status diferente de “Desligado”.</li>
         <li>Custos de instrutores só entram quando as horas estiverem marcadas como aprovadas.</li>
+        <li>A margem e o saldo são preliminares. A receita necessária mantém constantes os custos conhecidos desta competência; a quantidade de contratos usa o ticket médio observado e não inclui custos incrementais de novos jovens.</li>
+        <li>Os contratos ainda não estão ligados a cursos/turmas nem às capacidades por período; por isso, esta versão não recomenda qual curso vender nem quantas vagas cabem em cada unidade.</li>
         <li>Valores ausentes não são estimados. O saldo só ficará útil após validar importações, custos e regras de atribuição.</li>
     </ul>
 </section>

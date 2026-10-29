@@ -25,6 +25,7 @@ Primeira base funcional em PHP + MySQL. Inclui login com sessão, estrutura de a
 - Login e logout usam token CSRF; logout aceita somente POST.
 - IDs de usuário enviados por formulário aceitam apenas inteiros não negativos; novos usuários ainda exigem senha mínima.
 - Confirmação/cancelamento de importação exige o token da prévia atualmente armazenada na sessão.
+- O dashboard calcula margem preliminar e receita/contratos necessários para uma margem-alvo, mantendo os custos conhecidos do mês constantes; a simulação não grava dados.
 - Cada requisição protegida revalida no banco se o usuário continua ativo e recarrega perfil e permissões; usuários desativados perdem a sessão.
 - Ações de instrutores exigem a permissão correspondente de criar/editar e validam a unidade de origem/destino e o histórico da turma; aprovar horas permanece exclusivo do Master.
 - O resumo de instrutores separa custo aprovado, considerado no dashboard, de custo pendente de aprovação.
@@ -59,6 +60,7 @@ php tests/class_import_fields.php
 php tests/csrf_policy.php
 php tests/user_id_validation.php
 php tests/import_preview_binding.php
+php tests/financial_projection.php
 ```
 
 Os testes usam somente dados sintéticos; `authorization_policy.php` requer `pdo_sqlite`. Eles não conectam a um banco da aplicação nem usam dados reais.
