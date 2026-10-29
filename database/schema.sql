@@ -154,13 +154,25 @@ CREATE TABLE IF NOT EXISTS cost_entries (
   polo_id BIGINT UNSIGNED NULL,
   subsede_id BIGINT UNSIGNED NULL,
   notes VARCHAR(500) NULL,
+  source_type ENUM('manual','instructor_hours','import') NOT NULL DEFAULT 'manual',
+  source_reference VARCHAR(190) NULL,
+  calculation_method ENUM('manual_total','hours_rate','imported_total') NOT NULL DEFAULT 'manual_total',
+  status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  possible_duplicate_of BIGINT UNSIGNED NULL,
+  reviewed_by BIGINT UNSIGNED NULL,
+  reviewed_at DATETIME NULL,
+  review_note VARCHAR(500) NULL,
   created_by BIGINT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX ix_cost_entries_status_competence (status, competence),
+  INDEX ix_cost_entries_source (source_type, source_reference),
   CONSTRAINT fk_cost_category FOREIGN KEY (category_id) REFERENCES cost_categories(id),
   CONSTRAINT fk_cost_class FOREIGN KEY (class_id) REFERENCES classes(id),
   CONSTRAINT fk_cost_polo FOREIGN KEY (polo_id) REFERENCES polos(id),
   CONSTRAINT fk_cost_subsede FOREIGN KEY (subsede_id) REFERENCES subsedes(id),
-  CONSTRAINT fk_cost_user FOREIGN KEY (created_by) REFERENCES users(id)
+  CONSTRAINT fk_cost_user FOREIGN KEY (created_by) REFERENCES users(id),
+  CONSTRAINT fk_cost_duplicate_of FOREIGN KEY (possible_duplicate_of) REFERENCES cost_entries(id),
+  CONSTRAINT fk_cost_reviewed_by FOREIGN KEY (reviewed_by) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS import_batches (
