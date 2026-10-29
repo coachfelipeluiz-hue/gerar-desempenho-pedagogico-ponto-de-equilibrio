@@ -31,11 +31,11 @@ final class BreakEvenCalculator
             $periodDays = $contract['period_days'] ?? null;
 
             if (!is_finite($value) || $value < 0) {
-                throw new InvalidArgumentException("Valor mensal inválido no contrato {$index}.");
+                throw new \InvalidArgumentException("Valor mensal inválido no contrato {$index}.");
             }
             if (!is_int($activeDays) || !is_int($periodDays)
                 || $periodDays <= 0 || $activeDays < 0 || $activeDays > $periodDays) {
-                throw new InvalidArgumentException("Dias inválidos no contrato {$index}.");
+                throw new \InvalidArgumentException("Dias inválidos no contrato {$index}.");
             }
 
             $full += $value;
@@ -88,7 +88,7 @@ final class BreakEvenCalculator
     public static function operationalTarget(int $youthCount, int $target = 15): array
     {
         if ($youthCount < 0 || $target < 1) {
-            throw new InvalidArgumentException('Quantidade de jovens ou meta inválida.');
+            throw new \InvalidArgumentException('Quantidade de jovens ou meta inválida.');
         }
 
         return [
@@ -103,7 +103,7 @@ final class BreakEvenCalculator
     private static function assertNonNegativeFinite(float $value, string $label): void
     {
         if (!is_finite($value) || $value < 0) {
-            throw new InvalidArgumentException($label . ' deve ser um número finito não negativo.');
+            throw new \InvalidArgumentException($label . ' deve ser um número finito não negativo.');
         }
     }
 }
