@@ -60,6 +60,10 @@ function date_or_null(mixed $value): ?string {
         return null;
     }
 
+    if (preg_match('~\A(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})[ T]\d{1,2}:\d{2}(?::\d{2})?\z~', $value, $datePart)) {
+        $value = $datePart[1];
+    }
+
     foreach (['Y-m-d', 'd/m/Y', 'd-m-Y'] as $format) {
         $date = DateTimeImmutable::createFromFormat('!' . $format, $value);
         if ($date && $date->format($format) === $value) {
@@ -68,6 +72,78 @@ function date_or_null(mixed $value): ?string {
     }
 
     return null;
+}
+
+function contract_period_data(mixed $startRaw, mixed $endRaw): array {
+    $startText = trim((string)$startRaw);
+    $endText = trim((string)$endRaw);
+    $startDate = date_or_null($startText);
+    $endDate = date_or_null($endText);
+    $reason = null;
+
+    if ($startText !== '' && $startDate === null) {
+        $reason = 'invalid_start_date';
+    } elseif ($endText !== '' && $endDate === null) {
+        $reason = 'invalid_end_date';
+    } elseif ($startDate !== null && $endDate !== null && $endDate < $startDate) {
+        $reason = 'invalid_contract_period';
+    }
+
+    return [
+        'start_date' => $startDate,
+        'end_date' => $endDate,
+        'pending' => $reason !== null,
+        'pending_reason' => $reason,
+    ];
+}
+
+function date_looks_like_value(mixed $value): bool {
+    $value = trim((string)$value);
+    return $value !== '' && preg_match('~\A(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})(?:[ T].*)?\z~', $value) === 1;
+}
+
+function normalize_contract_marker(mixed $value): string {
+    $value = mb_strtolower(trim((string)$value), 'UTF-8');
+    $value = strtr($value, ['á'=>'a','à'=>'a','â'=>'a','ã'=>'a','ä'=>'a','é'=>'e','è'=>'e','ê'=>'e','ë'=>'e','í'=>'i','ì'=>'i','î'=>'i','ï'=>'i','ó'=>'o','ò'=>'o','ô'=>'o','õ'=>'o','ö'=>'o','ú'=>'u','ù'=>'u','û'=>'u','ü'=>'u','ç'=>'c']);
+    return preg_replace('/[^a-z0-9]+/', '', $value) ?? '';
+}
+
+function contract_discharge_data(mixed $flag, mixed $dateRaw): array {
+    $flag = mb_strtolower(trim((string)$flag), 'UTF-8');
+    $discharged = in_array($flag, ['sim', 'yes', 's'], true);
+    $active = in_array($flag, ['não', 'nao', 'no', 'n'], true);
+
+    if ($discharged) {
+        $terminationDate = date_or_null($dateRaw);
+        return [
+            'status' => 'Desligado',
+            'termination_date' => $terminationDate,
+            'pending' => $terminationDate === null,
+            'pending_reason' => $terminationDate === null ? 'missing_or_invalid_termination_date' : null,
+        ];
+    }
+    if ($active) {
+        $dateText = trim((string)$dateRaw);
+        $parsedDate = date_or_null($dateRaw);
+        $invalidDate = $parsedDate === null && date_looks_like_value($dateRaw);
+        $unexpectedDate = $parsedDate !== null;
+        $knownActiveMarker = $dateText === '' || in_array(normalize_contract_marker($dateText), ['ativo', 'nao', 'no', 'n'], true);
+        $unrecognizedText = !$knownActiveMarker && !$unexpectedDate && !$invalidDate;
+        $pending = $unexpectedDate || $invalidDate || $unrecognizedText;
+        return [
+            'status' => $pending ? 'Pendente' : 'Ativo',
+            'termination_date' => null,
+            'pending' => $pending,
+            'pending_reason' => $unexpectedDate ? 'status_date_conflict' : (($invalidDate || $unrecognizedText) ? 'invalid_termination_date' : null),
+        ];
+    }
+
+    return [
+        'status' => 'Pendente',
+        'termination_date' => null,
+        'pending' => true,
+        'pending_reason' => 'invalid_discharge_flag',
+    ];
 }
 
 function contract_csv_map(array $header): array {

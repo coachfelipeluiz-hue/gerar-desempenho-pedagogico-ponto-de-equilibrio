@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS contracts (
   monthly_value DECIMAL(13,2) NOT NULL DEFAULT 0,
   start_date DATE NULL,
   end_date DATE NULL,
+  termination_date DATE NULL,
   competence DATE NULL,
   status VARCHAR(60) NULL,
   attribution_method VARCHAR(100) NULL,

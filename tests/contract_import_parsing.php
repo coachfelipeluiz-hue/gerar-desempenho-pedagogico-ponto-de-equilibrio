@@ -59,6 +59,35 @@ try {
         $duplicateRejected = true;
     }
     assert_import($duplicateRejected, 'Código de contrato repetido no mesmo lote deve ser rejeitado.');
+    $discharged = contract_discharge_data('Sim', '10/03/2026');
+    assert_import($discharged['status'] === 'Desligado' && $discharged['termination_date'] === '2026-03-10' && !$discharged['pending'], 'Flag Sim com data válida deve guardar a data de desligamento.');
+    $missingTermination = contract_discharge_data('Sim', '');
+    assert_import($missingTermination['status'] === 'Desligado' && $missingTermination['termination_date'] === null && $missingTermination['pending'], 'Flag Sim sem data deve permanecer pendente.');
+    $invalidTermination = contract_discharge_data('Sim', '31/02/2026');
+    assert_import($invalidTermination['pending_reason'] === 'missing_or_invalid_termination_date', 'Data impossível de desligamento deve ficar pendente.');
+    $active = contract_discharge_data('Não', 'Não');
+    assert_import($active['status'] === 'Ativo' && !$active['pending'], 'Marcador Não reconhecido no segundo campo deve continuar ativo.');
+    $observedActiveMarker = contract_discharge_data('Não', 'Ativo');
+    assert_import($observedActiveMarker['status'] === 'Ativo' && !$observedActiveMarker['pending'], 'Marcador Ativo presente na base deve permanecer válido.');
+    $conflict = contract_discharge_data('Não', '10/03/2026');
+    assert_import($conflict['status'] === 'Pendente' && $conflict['pending'], 'Data de desligamento com flag Não deve ficar pendente, sem gerar receita silenciosamente.');
+    $invalidDateConflict = contract_discharge_data('Não', '31/02/2026');
+    assert_import($invalidDateConflict['status'] === 'Pendente' && $invalidDateConflict['pending_reason'] === 'invalid_termination_date', 'Data com formato de calendário impossível não deve virar contrato ativo.');
+    $unrecognizedText = contract_discharge_data('Não', 'foo');
+    assert_import($unrecognizedText['status'] === 'Pendente' && $unrecognizedText['pending'], 'Texto inesperado no campo de data não deve virar contrato ativo.');
+    $unsupportedDate = contract_discharge_data('Não', '31.02.2026');
+    assert_import($unsupportedDate['status'] === 'Pendente' && $unsupportedDate['pending'], 'Data em formato desconhecido não deve virar contrato ativo.');
+    $unknown = contract_discharge_data('Talvez', '');
+    assert_import($unknown['status'] === 'Pendente' && $unknown['pending'], 'Flag desconhecida não deve ser assumida como ativo.');
+    $emptyFlag = contract_discharge_data('', '');
+    assert_import($emptyFlag['status'] === 'Pendente' && $emptyFlag['pending'], 'Flag vazia não deve ser assumida como ativo.');
+
+    $optionalPeriod = contract_period_data('', '');
+    assert_import(!$optionalPeriod['pending'] && $optionalPeriod['start_date'] === null && $optionalPeriod['end_date'] === null, 'Início/fim opcionais vazios devem continuar representando limites abertos.');
+    $invalidPeriod = contract_period_data('2026-10-03', '2026-10-02');
+    assert_import($invalidPeriod['pending'] && $invalidPeriod['pending_reason'] === 'invalid_contract_period', 'Período invertido deve ser pendência.');
+    $invalidStart = contract_period_data('31/02/2026', '2026-12-31');
+    assert_import($invalidStart['pending'] && $invalidStart['pending_reason'] === 'invalid_start_date', 'Data inicial impossível deve ser pendência.');
 } finally {
     @unlink($path);
 }

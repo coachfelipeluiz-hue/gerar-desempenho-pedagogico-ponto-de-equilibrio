@@ -10,13 +10,16 @@
 - [ ] Testes de isolamento de acesso
 
 ## Fase 2 — importações
-- [ ] Inspecionar e mapear cabeçalhos reais das bases
-- [ ] Prévia CSV/XLSX, validação e detecção de duplicidades
-- [ ] Importação transacional e auditoria
+- [x] Mapear cabeçalhos do CSV Gerar.csv sem copiar registros pessoais para o repositório
+- [x] Prévia do importador de contratos, validação e detecção de códigos duplicados
+- [x] Importação transacional de contratos e auditoria; falta reconciliar em cópia de banco
+- [ ] Importar cursos/turmas e instrutores; concluir demais fontes
 - [ ] Reprocessamento e histórico
 
 ## Fase 3 — cálculos
-- [x] Primeira projeção testável de margem preliminar, receita para margem-alvo e ticket médio global por contrato; custos atuais são mantidos constantes e a projeção não substitui o motor completo de ponto de equilíbrio
+- [x] Primeira projeção testável de margem preliminar, receita para margem-alvo e ticket mensal nominal médio nos filtros/grupos; custos atuais são mantidos constantes e a projeção não substitui o motor completo de ponto de equilíbrio
+- [x] Ratear receita contratual por dias ativos e sinalizar status/desligamento sem dados válidos
+- [x] Agregar receita e ticket nominal médio em linhas separadas por subsede e polo
 - [ ] Reproduzir fórmulas da planilha de ponto de equilíbrio
 - [ ] Ocupação média ponderada por turma, polo, subsede e GERAR
 - [ ] Custos de instrutores horistas por horas efetivamente ministradas
@@ -24,8 +27,8 @@
 - [ ] Testes de reconciliação financeira
 
 ## Fase 4 — dashboard e simulador
-- [ ] Filtros de competência, subsede, polo e turma
-- [ ] Receita, custos, margem e lacuna até o equilíbrio
-- [ ] Abrir a receita por subsede/polo e recomendar cursos somente após relacionar contratos, turmas e capacidade do período
+- [x] Filtros de competência, subsede e polo; filtro de turma permanece pendente
+- [x] Receita, custos conhecidos, margem preliminar e lacuna para margem-alvo
+- [x] Detalhe de receita por subsede/polo; recomendações de curso aguardam vínculo de contratos, turmas e capacidade por período
 - [ ] Simular ajuste de contrato, aprendizes, preenchimento de capacidade e novas turmas
 - [ ] Exportações protegidas por permissão

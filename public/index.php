@@ -21,6 +21,12 @@ if (!$pdo instanceof PDO) {
     page_footer();
     exit;
 }
+$contractTerminationColumnExists = false;
+try {
+    $contractTerminationColumnExists = (bool)$pdo->query("SHOW COLUMNS FROM contracts LIKE 'termination_date'")->fetch();
+} catch (Throwable) {
+    $contractTerminationColumnExists = false;
+}
 
 $month = (string)($_GET['competence'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) {
@@ -80,6 +86,10 @@ if ($selectedPolo > 0 && !in_array($selectedPolo, $validPoloIds, true)) {
 }
 $unitWhereContracts = '';
 $contractParams = [$monthEnd, $monthStart];
+$contractWhere = ' WHERE ' . contract_monthly_candidate_where('c', $contractTerminationColumnExists);
+if ($contractTerminationColumnExists) {
+    $contractParams[] = $monthStart;
+}
 if ($unitFilterIds) {
     $ph = implode(',', array_fill(0, count($unitFilterIds), '?'));
     $unitWhereContracts .= " AND c.subsede_id IN ($ph)";
@@ -91,14 +101,18 @@ if ($selectedPolo > 0) {
     $unitWhereContracts .= ' AND c.polo_id = ?';
     $contractParams[] = $selectedPolo;
 }
-$contractSql = "SELECT COUNT(*) AS contract_count, COALESCE(SUM(c.monthly_value),0) AS revenue
+$terminationDateExpression = $contractTerminationColumnExists ? 'c.termination_date' : 'NULL';
+$contractSql = "SELECT c.subsede_id, s.name AS subsede_name, c.polo_id, p.name AS polo_name,
+                       c.monthly_value, c.start_date, c.end_date, {$terminationDateExpression} AS termination_date, c.status
                 FROM contracts c
-                WHERE (c.start_date IS NULL OR c.start_date <= ?)
-                  AND (c.end_date IS NULL OR c.end_date >= ?)
-                  AND (c.status IS NULL OR c.status <> 'Desligado')" . $unitWhereContracts;
+                LEFT JOIN subsedes s ON s.id = c.subsede_id
+                LEFT JOIN polos p ON p.id = c.polo_id" . $contractWhere . $unitWhereContracts . '
+                ORDER BY s.name, p.name';
 $stmt = $pdo->prepare($contractSql);
 $stmt->execute($contractParams);
-$contractMetrics = $stmt->fetch() ?: ['contract_count' => 0, 'revenue' => 0];
+$contractSummary = contract_monthly_summary($stmt->fetchAll(), $month);
+$contractMetrics = $contractSummary['metrics'];
+$contractGroups = $contractSummary['groups'];
 
 $classWhere = ' WHERE cl.competence >= ? AND cl.competence <= ?';
 $classParams = [$monthStart, $monthEnd];
@@ -170,7 +184,7 @@ $stmt->execute($hoursParams);
 $approvedInstructionCosts = (float)$stmt->fetchColumn();
 $knownCosts = $directCosts + $approvedInstructionCosts;
 $revenue = (float)$contractMetrics['revenue'];
-$projection = financial_projection($revenue, $knownCosts, $targetMarginPercent, $contractMetrics['contract_count']);
+$projection = financial_projection($revenue, $knownCosts, $targetMarginPercent, $contractMetrics['contract_count'], $contractMetrics['average_monthly_value']);
 $result = $projection['operating_result'];
 $average = (int)$classMetrics['class_count'] > 0 ? (int)$classMetrics['apprentices'] / (int)$classMetrics['class_count'] : 0;
 
@@ -181,6 +195,9 @@ page_header('Visão geral');
     <strong>Indicadores preliminares.</strong>
     Os valores são calculados a partir dos registros disponíveis no banco para <?= e(date('m/Y', strtotime($monthStart))) ?>. Custos incompletos ou dados ainda não importados podem distorcer o resultado; este painel não substitui a validação contábil.
 </div>
+<?php if (!$contractTerminationColumnExists): ?>
+<div class="error">O banco ainda não tem a coluna de data de desligamento. Execute <code>database/migrations/20261029_contract_termination_date.sql</code> e reimporte os contratos; até lá, registros desligados ficam como pendência e fora da receita.</div>
+<?php endif; ?>
 
 <form method="get" class="panel">
     <div class="filters">
@@ -216,11 +233,12 @@ page_header('Visão geral');
     <article class="card"><span>Turmas na faixa regular (15 a 25)</span><strong><?= number_format($classesRegular, 0, ',', '.') ?></strong><small>Dentro da faixa mínima, mas sem ultrapassar 25 jovens</small></article>
     <article class="card"><span>Turmas ótimas (&gt; 25)</span><strong><?= number_format($classesOptimal, 0, ',', '.') ?></strong><small>Mais de 25 jovens</small></article>
     <article class="card"><span>Média por turma</span><strong><?= number_format($average, 1, ',', '.') ?></strong><small>Aprendizes ÷ turmas com competência</small></article>
-    <article class="card"><span>Receita mensal contratual</span><strong><?= e($money($revenue)) ?></strong><small><?= (int)$contractMetrics['contract_count'] ?> contratos vigentes na competência</small></article>
+    <article class="card"><span>Receita contratual reconhecida</span><strong><?= e($money($revenue)) ?></strong><small><?= (int)$contractMetrics['contract_count'] ?> contratos com dados válidos na competência</small></article>
+    <article class="card"><span>Pendências de contratos</span><strong><?= number_format((int)$contractMetrics['pending_count'], 0, ',', '.') ?></strong><small>Excluídas da receita até correção de status ou datas</small></article>
     <article class="card"><span>Custos conhecidos</span><strong><?= e($money($knownCosts)) ?></strong><small>Custos cadastrados + horas de instrução aprovadas</small></article>
     <article class="card"><span>Saldo preliminar</span><strong><?= e($money($result)) ?></strong><small>Receita contratual menos custos conhecidos; não é lucro contábil</small></article>
     <article class="card"><span>Margem preliminar sobre receita</span><strong><?= $projection['current_margin_percent'] === null ? '—' : number_format($projection['current_margin_percent'], 1, ',', '.') . '%' ?></strong><small>Saldo preliminar ÷ receita contratual</small></article>
-    <article class="card"><span>Ticket mensal médio por contrato</span><strong><?= $projection['average_revenue_per_contract'] === null ? '—' : e($money($projection['average_revenue_per_contract'])) ?></strong><small>Receita ÷ contratos vigentes no grupo filtrado</small></article>
+    <article class="card"><span>Ticket mensal médio por contrato</span><strong><?= $projection['average_revenue_per_contract'] === null ? '—' : e($money($projection['average_revenue_per_contract'])) ?></strong><small>Média do valor mensal nominal no grupo filtrado</small></article>
     <article class="card"><span>Receita necessária para margem-alvo</span><strong><?= e($money($projection['required_revenue'])) ?></strong><small>Meta selecionada: <?= number_format($targetMarginPercent, 1, ',', '.') ?>%</small></article>
     <article class="card"><span>Contratos adicionais estimados</span><strong><?= $projection['additional_contracts'] === null ? '—' : number_format($projection['additional_contracts'], 0, ',', '.') ?></strong><small>Lacuna de receita ÷ média por contrato vigente</small></article>
 </section>
@@ -228,10 +246,35 @@ page_header('Visão geral');
 <?php if ($targetMarginInvalid): ?><div class="error">A margem-alvo informada é inválida. A simulação foi redefinida para 0%.</div><?php endif; ?>
 
 <section class="panel">
+    <h2>Receita por subsede e polo</h2>
+    <p class="muted">Cada polo aparece em linha separada. A receita do mês é proporcional aos dias ativos; o ticket médio mostra o valor mensal nominal por contrato. Datas/status pendentes ficam fora da receita.</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Subsede</th><th>Polo</th><th>Contratos reconhecidos</th><th>Receita na competência</th><th>Ticket mensal médio</th><th>Pendências</th></tr></thead>
+            <tbody>
+            <?php if (!$contractGroups): ?>
+                <tr><td colspan="6">Nenhum contrato elegível para os filtros selecionados.</td></tr>
+            <?php else: foreach ($contractGroups as $group): ?>
+                <tr>
+                    <td><?= e($group['subsede_name']) ?></td>
+                    <td><?= e($group['polo_name'] ?? 'Sem polo') ?></td>
+                    <td><?= number_format((int)$group['contract_count'], 0, ',', '.') ?></td>
+                    <td><?= e($money($group['revenue'])) ?></td>
+                    <td><?= $group['average_monthly_value'] === null ? '—' : e($money($group['average_monthly_value'])) ?></td>
+                    <td><?= number_format((int)$group['pending_count'], 0, ',', '.') ?></td>
+                </tr>
+            <?php endforeach; endif; ?>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel">
     <h2>Como interpretar este painel</h2>
     <ul>
         <li>Os indicadores de turma dependem de registros na tabela de turmas com a competência preenchida.</li>
-        <li>A receita soma contratos com datas vigentes no período e status diferente de “Desligado”.</li>
+        <li>Contratos são contabilizados nos dias entre início e fim contratual; desligamento válido é considerado como último dia ativo (inclusive) e o valor mensal é rateado pelos dias do mês.</li>
+        <li>Status vazio/desconhecido, desligamento sem data válida, data preenchida mas inválida ou intervalo invertido fica fora da receita e aparece como pendência. Início/fim vazios são limites abertos; valores válidos limitam os dias considerados.</li>
         <li>Custos de instrutores só entram quando as horas estiverem marcadas como aprovadas.</li>
         <li>A margem e o saldo são preliminares. A receita necessária mantém constantes os custos conhecidos desta competência; a quantidade de contratos usa o ticket médio observado e não inclui custos incrementais de novos jovens.</li>
         <li>Os contratos ainda não estão ligados a cursos/turmas nem às capacidades por período; por isso, esta versão não recomenda qual curso vender nem quantas vagas cabem em cada unidade.</li>

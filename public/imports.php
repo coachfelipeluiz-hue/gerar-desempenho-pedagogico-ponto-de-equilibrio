@@ -32,14 +32,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tempName = bin2hex(random_bytes(16)) . '.csv';
                 $target = $uploadDir . '/' . $tempName;
                 if (!move_uploaded_file($f['tmp_name'], $target)) throw new RuntimeException('Não foi possível guardar o arquivo temporário. Verifique a permissão de escrita em storage/uploads.');
-                $rows = 0; $valid = 0; $invalid = 0; $sample = []; $map = null; $headerSeen = false;
+                $rows = 0; $valid = 0; $invalid = 0; $terminationPending = 0; $periodPending = 0; $sample = []; $map = null; $headerSeen = false; $previewSeenCodes = [];
                 foreach (import_csv_rows($target) as [$line, $header, $row]) {
                     if (!$headerSeen) { $map = contract_csv_map($header); $headerSeen = true; }
                     $rows++;
                     $contract = trim((string)($row[$map['2 Contrato']] ?? ''));
                     $subName = trim((string)($row[$map['9 Subsede']] ?? ''));
                     $amount = money_to_float($row[$map['19 $ Mensal']] ?? '');
-                    if ($contract !== '' && $subName !== '' && is_finite($amount) && $amount >= 0) $valid++; else $invalid++;
+                    $discharge = contract_discharge_data($row[$map['17 Desligado']] ?? '', $row[$map['18 Desligado']] ?? '');
+                    $period = contract_period_data($row[$map['15 Dt Inicio Ctr']] ?? '', $row[$map['16 Dt Final Ctr']] ?? '');
+                    $rowImportable = $contract !== '' && $subName !== '' && is_finite($amount) && $amount >= 0;
+                    if ($rowImportable) {
+                        try {
+                            assert_unique_contract_code($contract, $previewSeenCodes);
+                        } catch (RuntimeException) {
+                            $rowImportable = false;
+                        }
+                    }
+                    if ($rowImportable) {
+                        $valid++;
+                        if ($discharge['pending']) $terminationPending++;
+                        if ($period['pending']) $periodPending++;
+                    } else {
+                        $invalid++;
+                    }
                     if (count($sample) < 8) $sample[] = ['contrato'=>$contract, 'subsede'=>$subName, 'polo'=>trim((string)($row[$map['10 Polo (Local Curso)']] ?? '')), 'empresa'=>trim((string)($row[$map['12 Empresa']] ?? '')), 'mensal'=>is_finite($amount) ? $amount : null, 'desligado'=>trim((string)($row[$map['17 Desligado']] ?? ''))];
                 }
                 if (!$headerSeen) throw new RuntimeException('Não há registros no CSV.');
@@ -49,12 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'rows'=>$rows,
                     'valid'=>$valid,
                     'invalid'=>$invalid,
+                    'termination_pending'=>$terminationPending,
+                    'period_pending'=>$periodPending,
                     'preview_token'=>bin2hex(random_bytes(32)),
                 ];
                 $previous = $_SESSION['pending_contract_import'] ?? null;
                 if (is_array($previous) && !empty($previous['path']) && $previous['path'] !== $target) @unlink((string)$previous['path']);
                 $_SESSION['pending_contract_import'] = $pending;
-                $preview = ['rows'=>$rows, 'valid'=>$valid, 'invalid'=>$invalid, 'sample'=>$sample, 'preview_token'=>$pending['preview_token']];
+                $preview = ['rows'=>$rows, 'valid'=>$valid, 'invalid'=>$invalid, 'termination_pending'=>$terminationPending, 'period_pending'=>$periodPending, 'sample'=>$sample, 'preview_token'=>$pending['preview_token']];
             } catch (Throwable $e) { $errors[] = $e->getMessage(); }
         }
     } elseif (($_POST['action'] ?? '') === 'confirm') {
@@ -69,6 +87,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Banco de dados indisponível. Configure config/database.php e importe database/schema.sql antes de confirmar.';
         } else {
             try {
+                $terminationColumn = $pdo->query("SHOW COLUMNS FROM contracts LIKE 'termination_date'")->fetch();
+                if (!$terminationColumn) {
+                    throw new RuntimeException('Aplique database/migrations/20261029_contract_termination_date.sql no banco antes de confirmar esta importação.');
+                }
                 $pdo->beginTransaction();
                 $batch = $pdo->prepare("INSERT INTO import_batches (source_type,file_name,status,total_rows,valid_rows,rejected_rows,uploaded_by) VALUES ('contracts_csv',?,'validated',?,?,?,?)");
                 $batch->execute([$pending['name'], $pending['rows'], $pending['valid'], $pending['invalid'], (int)(current_user()['id'] ?? 0) ?: null]);
@@ -83,8 +105,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $historyClose = $pdo->prepare('UPDATE polo_subsede_history SET valid_until = DATE_SUB(?, INTERVAL 1 DAY) WHERE id = ?');
                 $historyInsert = $pdo->prepare('INSERT INTO polo_subsede_history (polo_id, subsede_id, valid_from, created_by) VALUES (?, ?, ?, ?)');
                 $contractSelect = $pdo->prepare('SELECT id FROM contracts WHERE source_code = ?');
-                $contractUpdate = $pdo->prepare('UPDATE contracts SET subsede_id=?,polo_id=?,customer_name=?,monthly_value=?,start_date=?,end_date=?,status=?,imported_batch_id=? WHERE id=?');
-                $contractInsert = $pdo->prepare('INSERT INTO contracts (source_code,subsede_id,polo_id,customer_name,monthly_value,start_date,end_date,status,imported_batch_id) VALUES (?,?,?,?,?,?,?,?,?)');
+                $contractUpdate = $pdo->prepare('UPDATE contracts SET subsede_id=?,polo_id=?,customer_name=?,monthly_value=?,start_date=?,end_date=?,termination_date=?,status=?,imported_batch_id=? WHERE id=?');
+                $contractInsert = $pdo->prepare('INSERT INTO contracts (source_code,subsede_id,polo_id,customer_name,monthly_value,start_date,end_date,termination_date,status,imported_batch_id) VALUES (?,?,?,?,?,?,?,?,?,?)');
                 $count = 0; $skipped = 0; $seenContractCodes = [];
                 foreach (contract_csv_import_rows($pending['path']) as [$line, $map, $row]) {
                     $code = trim((string)($row[$map['2 Contrato']] ?? ''));
@@ -94,7 +116,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $company = trim((string)($row[$map['12 Empresa']] ?? ''));
                     $monthly = money_to_float($row[$map['19 $ Mensal']] ?? '');
                     if ($code === '' || $subName === '' || !is_finite($monthly) || $monthly < 0) { $skipped++; continue; }
-                    assert_unique_contract_code($code, $seenContractCodes);
+                    try {
+                        assert_unique_contract_code($code, $seenContractCodes);
+                    } catch (RuntimeException) {
+                        $skipped++;
+                        continue;
+                    }
                     $subSelect->execute([$subCode]); $subId = $subSelect->fetchColumn();
                     if ($subId) { $subUpdate->execute([$subName,(int)$subId]); }
                     else { $subInsert->execute([$subName,$subCode !== '' ? $subCode : null]); $subId = $pdo->lastInsertId(); }
@@ -104,8 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($poloId) $poloUpdate->execute([$poloName,(int)$poloId]);
                         else { $poloInsert->execute([$poloName,$poloName]); $poloId = $pdo->lastInsertId(); }
                     }
-                    $start = date_or_null($row[$map['15 Dt Inicio Ctr']] ?? '');
-                    $end = date_or_null($row[$map['16 Dt Final Ctr']] ?? '');
+                    $period = contract_period_data($row[$map['15 Dt Inicio Ctr']] ?? '', $row[$map['16 Dt Final Ctr']] ?? '');
+                    $start = $period['start_date'];
+                    $end = $period['end_date'];
                     // Mantém a responsabilidade do polo vinculada à subsede no histórico.
                     if ($poloId) {
                         $effectiveDate = $start ?? date('Y-m-d');
@@ -118,21 +146,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $historyInsert->execute([(int)$poloId, (int)$subId, $effectiveDate, (int)(current_user()['id'] ?? 0) ?: null]);
                         }
                     }
-                    $disabled = mb_strtolower(trim((string)($row[$map['17 Desligado']] ?? '')), 'UTF-8');
-                    $status = ($disabled === 'sim' || $disabled === 'yes') ? 'Desligado' : 'Ativo';
+                    $discharge = contract_discharge_data($row[$map['17 Desligado']] ?? '', $row[$map['18 Desligado']] ?? '');
+                    $status = $period['pending'] ? 'Pendente' : $discharge['status'];
+                    $terminationDate = $discharge['termination_date'];
                     $contractSelect->execute([$code]);
                     $existingContracts = $contractSelect->fetchAll();
                     if (count($existingContracts) > 1) throw new RuntimeException('O número de contrato já identifica mais de um registro no banco. Corrija a duplicidade antes de importar.');
                     $existingId = $existingContracts[0]['id'] ?? null;
-                    if ($existingId) $contractUpdate->execute([(int)$subId, $poloId ? (int)$poloId : null, $company, $monthly, $start, $end, $status, $batchId, (int)$existingId]);
-                    else $contractInsert->execute([$code,(int)$subId,$poloId ? (int)$poloId : null,$company,$monthly,$start,$end,$status,$batchId]);
+                    if ($existingId) $contractUpdate->execute([(int)$subId, $poloId ? (int)$poloId : null, $company, $monthly, $start, $end, $terminationDate, $status, $batchId, (int)$existingId]);
+                    else $contractInsert->execute([$code,(int)$subId,$poloId ? (int)$poloId : null,$company,$monthly,$start,$end,$terminationDate,$status,$batchId]);
                     $count++;
                 }
                 $pdo->prepare("UPDATE import_batches SET status='imported', valid_rows=?, rejected_rows=? WHERE id=?")->execute([$count,$skipped,$batchId]);
                 if (function_exists('audit')) audit($pdo, (int)(current_user()['id'] ?? 0) ?: null, 'import_contracts_csv', 'import_batch', $batchId, ['imported'=>$count,'skipped'=>$skipped,'file'=>$pending['name']]);
                 $pdo->commit();
                 @unlink($pending['path']); unset($_SESSION['pending_contract_import']);
-                $messages[] = "Importação concluída: {$count} contratos processados; {$skipped} linhas ignoradas. Reimportar a mesma base atualiza contratos existentes pelo número do contrato.";
+                $terminationPending = (int)($pending['termination_pending'] ?? 0);
+                $periodPending = (int)($pending['period_pending'] ?? 0);
+                $messages[] = "Importação concluída: {$count} contratos processados; {$skipped} linhas ignoradas; {$terminationPending} pendências de status/data de desligamento e {$periodPending} datas/períodos de vigência inválidos ficam fora da receita mensal até correção.";
             } catch (Throwable $e) {
                 if ($pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
                 $errors[] = 'A importação foi cancelada e revertida: ' . $e->getMessage();
@@ -146,7 +177,7 @@ if (!$preview && !empty($_SESSION['pending_contract_import'])) {
         $p['preview_token'] = bin2hex(random_bytes(32));
         $_SESSION['pending_contract_import'] = $p;
     }
-    $preview = ['rows'=>$p['rows'],'valid'=>$p['valid'],'invalid'=>$p['invalid'],'sample'=>[],'preview_token'=>$p['preview_token']];
+    $preview = ['rows'=>$p['rows'],'valid'=>$p['valid'],'invalid'=>$p['invalid'],'termination_pending'=>$p['termination_pending'] ?? 0,'period_pending'=>$p['period_pending'] ?? 0,'sample'=>[],'preview_token'=>$p['preview_token']];
 }
 page_header('Importação de dados');
 ?>
@@ -155,7 +186,8 @@ page_header('Importação de dados');
 <div class="notice"><strong>Importação inicial.</strong> Esta etapa importa a base de contratos por número de contrato, relaciona subsede e polo e usa a coluna <code>$ Mensal</code>. Não importa CPF nem nome de aprendiz. Faça uma cópia de segurança do banco antes de importar uma base oficial.</div>
 <div class="panel"><h2>1. Contratos — Gerar.csv</h2><p class="muted">Envie o CSV original exportado do sistema. A tela valida o cabeçalho e mostra uma prévia antes de gravar no banco. Limite: 25 MB.</p>
 <form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="upload"><label for="csv_file">Arquivo CSV</label><input id="csv_file" type="file" name="csv_file" accept=".csv,text/csv" required><p><button type="submit">Enviar e validar CSV</button></p></form></div>
-<?php if ($preview): ?><div class="panel"><h2>2. Prévia da importação</h2><div class="stats"><div class="stat"><span>Linhas lidas</span><strong><?= (int)$preview['rows'] ?></strong></div><div class="stat"><span>Válidas</span><strong><?= (int)$preview['valid'] ?></strong></div><div class="stat"><span>Inválidas</span><strong><?= (int)$preview['invalid'] ?></strong></div></div>
+<?php if ($preview): ?><div class="panel"><h2>2. Prévia da importação</h2><div class="stats"><div class="stat"><span>Linhas lidas</span><strong><?= (int)$preview['rows'] ?></strong></div><div class="stat"><span>Válidas</span><strong><?= (int)$preview['valid'] ?></strong></div><div class="stat"><span>Inválidas</span><strong><?= (int)$preview['invalid'] ?></strong></div><div class="stat"><span>Pendências de desligamento/status</span><strong><?= (int)($preview['termination_pending'] ?? 0) ?></strong></div><div class="stat"><span>Datas/períodos inválidos</span><strong><?= (int)($preview['period_pending'] ?? 0) ?></strong></div></div>
+<p class="muted">Contratos desligados com data válida têm o valor mensal proporcional aos dias ativos, incluindo a data do desligamento. Status desconhecidos, data de desligamento incompatível ou inválida e datas de vigência preenchidas mas inválidas ficam fora da receita até correção. Início/fim em branco são tratados como limites abertos da competência.</p>
 <?php if (!empty($preview['sample'])): ?><div class="table-wrap"><table><thead><tr><th>Contrato</th><th>Subsede</th><th>Polo</th><th>Empresa</th><th>Valor mensal</th><th>Desligado?</th></tr></thead><tbody><?php foreach ($preview['sample'] as $r): ?><tr><td><?= e($r['contrato']) ?></td><td><?= e($r['subsede']) ?></td><td><?= e($r['polo']) ?></td><td><?= e($r['empresa']) ?></td><td><?= $r['mensal'] === null ? 'Inválido' : 'R$ ' . number_format((float)$r['mensal'],2,',','.') ?></td><td><?= e($r['desligado']) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
 <form method="post"><input type="hidden" name="csrf" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="confirm"><input type="hidden" name="preview_token" value="<?= e($preview['preview_token']) ?>"><?php if ((int)$preview['invalid'] > 0): ?><label><input type="checkbox" name="skip_invalid" value="1" required> Ignorar as linhas inválidas e importar somente as válidas.</label><?php endif; ?><p><button type="submit">Confirmar e importar para o banco</button></p></form></div><?php endif; ?>
 <div class="panel"><h2>Próximas fontes</h2>

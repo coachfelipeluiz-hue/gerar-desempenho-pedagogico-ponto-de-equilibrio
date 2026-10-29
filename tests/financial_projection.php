@@ -28,6 +28,8 @@ assert_financial_projection($noRevenue['current_margin_percent'] === null, 'A ma
 assert_financial_projection($noRevenue['additional_contracts'] === null, 'Não se estima contratos sem receita média observável.');
 assert_financial_projection($noRevenue['required_revenue'] === 5000.0, 'Custos positivos devem produzir receita mínima requerida.');
 assert_financial_projection(financial_projection(100, 0, 0, '0002')['average_revenue_per_contract'] === 50.0, 'Contagem textual válida deve ser normalizada.');
+$nominalTicket = financial_projection(1000, 12500, 0, 1, 3100);
+assert_financial_projection($nominalTicket['average_revenue_per_contract'] === 3100.0 && $nominalTicket['additional_contracts'] === 4, 'Estimativa de contratos deve usar o ticket nominal, não uma receita de mês parcial.');
 
 foreach ([
     [-1, 1, 0, 1],
