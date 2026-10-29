@@ -103,9 +103,9 @@ page_header('Turmas');
 ?>
 <div class="notice">Classificação operacional: abaixo do mínimo = menos de 15 jovens; faixa regular = 15 a 25; turma ótima = mais de 25 jovens. A consulta mostra até 1.000 registros por vez.</div>
 <section class="cards">
-    <article class="card"><span>Abaixo do mínimo</span><strong><?= $moneyCount($counts['below']) ?></strong><small>Menos de 15 jovens nos resultados filtrados</small></article>
-    <article class="card"><span>Faixa regular</span><strong><?= $moneyCount($counts['regular']) ?></strong><small>De 15 a 25 jovens nos resultados filtrados</small></article>
-    <article class="card"><span>Turmas ótimas</span><strong><?= $moneyCount($counts['optimal']) ?></strong><small>Mais de 25 jovens nos resultados filtrados</small></article>
+    <article class="card"><span>Abaixo do mínimo</span><strong><?= $moneyCount($counts['below']) ?></strong><small>Menos de 15 jovens nos registros exibidos</small></article>
+    <article class="card"><span>Faixa regular</span><strong><?= $moneyCount($counts['regular']) ?></strong><small>De 15 a 25 jovens nos registros exibidos</small></article>
+    <article class="card"><span>Turmas ótimas</span><strong><?= $moneyCount($counts['optimal']) ?></strong><small>Mais de 25 jovens nos registros exibidos</small></article>
 </section>
 <section class="panel">
     <h2>Consultar turmas</h2>
