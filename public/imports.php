@@ -109,6 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $poloSelect = $pdo->prepare('SELECT id FROM polos WHERE source_code = ? LIMIT 1');
                 $poloInsert = $pdo->prepare('INSERT INTO polos (name,source_code,active) VALUES (?,?,1)');
                 $poloUpdate = $pdo->prepare('UPDATE polos SET name = ?, active = 1 WHERE id = ?');
+                $historyCurrent = $pdo->prepare('SELECT id, subsede_id, valid_from FROM polo_subsede_history WHERE polo_id = ? AND valid_until IS NULL ORDER BY valid_from DESC, id DESC LIMIT 1');
+                $historyClose = $pdo->prepare('UPDATE polo_subsede_history SET valid_until = DATE_SUB(?, INTERVAL 1 DAY) WHERE id = ?');
+                $historyInsert = $pdo->prepare('INSERT INTO polo_subsede_history (polo_id, subsede_id, valid_from, created_by) VALUES (?, ?, ?, ?)');
                 $contractSelect = $pdo->prepare('SELECT id FROM contracts WHERE source_code = ? LIMIT 1');
                 $contractUpdate = $pdo->prepare('UPDATE contracts SET subsede_id=?,polo_id=?,customer_name=?,monthly_value=?,start_date=?,end_date=?,status=?,imported_batch_id=? WHERE id=?');
                 $contractInsert = $pdo->prepare('INSERT INTO contracts (source_code,subsede_id,polo_id,customer_name,monthly_value,start_date,end_date,status,imported_batch_id) VALUES (?,?,?,?,?,?,?,?,?)');
@@ -133,6 +136,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     $start = date_or_null($row[$map['15 Dt Inicio Ctr']] ?? '');
                     $end = date_or_null($row[$map['16 Dt Final Ctr']] ?? '');
+                    // Mantém a responsabilidade do polo vinculada à subsede no histórico.
+                    if ($poloId) {
+                        $effectiveDate = $start ?? date('Y-m-d');
+                        $historyCurrent->execute([(int)$poloId]);
+                        $currentAssignment = $historyCurrent->fetch();
+                        if (!$currentAssignment) {
+                            $historyInsert->execute([(int)$poloId, (int)$subId, $effectiveDate, (int)(current_user()['id'] ?? 0) ?: null]);
+                        } elseif ((int)$currentAssignment['subsede_id'] !== (int)$subId && $effectiveDate > $currentAssignment['valid_from']) {
+                            $historyClose->execute([$effectiveDate, (int)$currentAssignment['id']]);
+                            $historyInsert->execute([(int)$poloId, (int)$subId, $effectiveDate, (int)(current_user()['id'] ?? 0) ?: null]);
+                        }
+                    }
                     $disabled = mb_strtolower(trim((string)($row[$map['17 Desligado']] ?? '')), 'UTF-8');
                     $status = ($disabled === 'sim' || $disabled === 'yes') ? 'Desligado' : 'Ativo';
                     $contractSelect->execute([$code]); $existingId = $contractSelect->fetchColumn();
