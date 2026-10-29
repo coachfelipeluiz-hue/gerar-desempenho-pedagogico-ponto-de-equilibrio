@@ -35,7 +35,8 @@ function page_header(string $title): void {
     <body>
         <header class="topbar">
             <a class="brand" href="<?= e($base) ?>/index.php">
-                GERAR <span>Ponto de Equilíbrio</span>
+                <img class="brand-logo" src="<?= e($base) ?>/assets/jornada-aprendiz-retina.png" alt="Jornada do Aprendiz">
+                <span class="brand-copy">GERAR <small>Ponto de Equilíbrio</small></span>
             </a>
 
             <?php if ($user): ?>
