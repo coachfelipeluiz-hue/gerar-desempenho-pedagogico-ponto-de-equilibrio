@@ -102,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $foundSubsede = $stmt->fetchColumn();
                 if ($foundSubsede) $subsedeId = (int)$foundSubsede;
             }
-            $stmt = $pdo->prepare('INSERT INTO cost_entries (category_id, amount, competence, class_id, polo_id, subsede_id, notes, source_type, calculation_method, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', 'manual_total', 'pending', ?)');
+            $stmt = $pdo->prepare("INSERT INTO cost_entries (category_id, amount, competence, class_id, polo_id, subsede_id, notes, source_type, calculation_method, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', 'manual_total', 'pending', ?)");
             $stmt->execute([$categoryId, $amount, $competence . '-01', $classId, $poloId, $subsedeId, $notes !== '' ? $notes : null, (int)$user['id']]);
             $id = (int)$pdo->lastInsertId();
             audit($pdo, (int)$user['id'], 'create', 'cost_entry', $id, ['category_id'=>$categoryId,'amount'=>$amount,'competence'=>$competence,'subsede_id'=>$subsedeId,'polo_id'=>$poloId,'class_id'=>$classId]);
