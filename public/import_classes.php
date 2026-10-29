@@ -30,9 +30,32 @@ function class_csv_read(string $path): array {
     if (!$fh) throw new RuntimeException('Não foi possível ler o CSV enviado.');
     $first = fgets($fh);
     if ($first === false) { fclose($fh); throw new RuntimeException('O arquivo está vazio.'); }
-    $delimiters = [',' => substr_count($first, ','), ';' => substr_count($first, ';'), "\t" => substr_count($first, "\t")];
-    arsort($delimiters);
-    $delimiter = (string)array_key_first($delimiters);
+
+    // Escolhe o delimitador pela consistência do número de colunas nas primeiras linhas,
+    // e não pela contagem bruta de separadores (que falha com separadores dentro de aspas).
+    $candidates = [',' , ';', "\t"];
+    $scores = [];
+    foreach ($candidates as $candidate) {
+        $probe = fopen($path, 'rb');
+        if (!$probe) continue;
+        $counts = [];
+        $sampled = 0;
+        while (($probeRow = fgetcsv($probe, 0, $candidate, '"', '\\')) !== false && $sampled < 12) {
+            if (count($probeRow) === 1 && trim((string)$probeRow[0]) === '') continue;
+            $counts[] = count($probeRow);
+            $sampled++;
+        }
+        fclose($probe);
+        if (!$counts) { $scores[$candidate] = -1; continue; }
+        $freq = array_count_values($counts);
+        arsort($freq);
+        $dominant = (int)array_key_first($freq);
+        $consistent = (int)($freq[$dominant] ?? 0);
+        $scores[$candidate] = ($dominant > 1 ? 1000 : 0) + ($consistent * 10) + $dominant;
+    }
+    arsort($scores);
+    $delimiter = (string)array_key_first($scores);
+    if (($scores[$delimiter] ?? 0) < 0) { fclose($fh); throw new RuntimeException('Não foi possível identificar o separador do CSV.'); }
     rewind($fh);
     $header = fgetcsv($fh, 0, $delimiter, '"', '\\');
     if (!$header) { fclose($fh); throw new RuntimeException('Cabeçalho não encontrado.'); }
@@ -117,7 +140,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($map['name'] < 0) throw new RuntimeException('Selecione a coluna que contém o nome da turma.');
             if ($map['polo'] < 0 && $map['subsede'] >= 0) throw new RuntimeException('Você selecionou a subsede, mas não o polo. Se o arquivo não contém polos, deixe ambos sem mapeamento.');
+            $mapped = [];
+            foreach ($map as $field => $index) {
+                if ($index < 0) continue;
+                if (isset($mapped[$index])) {
+                    throw new RuntimeException('A mesma coluna foi atribuída a dois campos (' . $fields[$index] . ' e ' . $field . '). Revise o mapeamento antes de importar.');
+                }
+                $mapped[$index] = $field;
+            }
             $parsed = class_csv_read((string)$pending['path']);
+            if (count($parsed['header']) !== count($header)) throw new RuntimeException('O cabeçalho do CSV mudou desde a prévia. Envie o arquivo novamente.');
+            $preflightErrors = [];
+            $seenCodes = [];
+            $seenIdentities = [];
+            foreach ($parsed['rows'] as $item) {
+                $row = $item['values'];
+                $line = (int)$item['line'];
+                if (count($row) !== count($header)) {
+                    $preflightErrors[] = 'Linha ' . $line . ': contém ' . count($row) . ' campos; o cabeçalho tem ' . count($header) . '.';
+                    continue;
+                }
+                $name = class_value($row, $map, 'name');
+                if ($name === '') {
+                    $preflightErrors[] = 'Linha ' . $line . ': nome da turma vazio.';
+                    continue;
+                }
+                $code = class_value($row, $map, 'source_code');
+                if ($code !== '') {
+                    $key = mb_strtolower($code, 'UTF-8');
+                    if (isset($seenCodes[$key])) $preflightErrors[] = 'Linha ' . $line . ': código de origem duplicado no arquivo (também na linha ' . $seenCodes[$key] . '): ' . $code . '.';
+                    else $seenCodes[$key] = $line;
+                } else {
+                    $polo = mb_strtolower(class_value($row, $map, 'polo'), 'UTF-8');
+                    $identity = mb_strtolower(trim($name), 'UTF-8') . '|' . $polo;
+                    if (isset($seenIdentities[$identity])) $preflightErrors[] = 'Linha ' . $line . ': nome e polo repetidos sem código de origem (também na linha ' . $seenIdentities[$identity] . ').';
+                    else $seenIdentities[$identity] = $line;
+                }
+            }
+            if ($preflightErrors) {
+                $shown = array_slice($preflightErrors, 0, 12);
+                $suffix = count($preflightErrors) > count($shown) ? ' E mais ' . (count($preflightErrors) - count($shown)) . ' erro(s).' : '';
+                throw new RuntimeException("Pré-validação interrompida; nenhuma linha foi gravada:\n- " . implode("\n- ", $shown) . $suffix);
+            }
             $pdo->beginTransaction();
             $batchStmt = $pdo->prepare("INSERT INTO import_batches (source_type,file_name,status,total_rows,valid_rows,rejected_rows,uploaded_by) VALUES ('classes_csv',?,'validated',?,0,0,?)");
             $batchStmt->execute([$pending['name'],$pending['rows'],(int)(current_user()['id'] ?? 0) ?: null]);
@@ -139,7 +203,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($parsed['rows'] as $item) {
                 $row = $item['values'];
                 $name = class_value($row,$map,'name');
-                if ($name === '') { $skipped++; continue; }
                 $code = class_value($row,$map,'source_code');
                 $course = class_value($row,$map,'course_name');
                 $subName = class_value($row,$map,'subsede');
@@ -196,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Throwable $ex) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        if ($ex instanceof PDOException && (string)$ex->getCode() === '23000') $errors[] = 'A importação encontrou um conflito de dados (por exemplo, código de origem duplicado). Confira o CSV e tente novamente.';
+        if ($ex instanceof PDOException && (string)$ex->getCode() === '23000') $errors[] = 'Conflito de integridade no banco; toda a transação foi desfeita. Verifique códigos duplicados, relações e campos obrigatórios. Detalhe técnico: ' . $ex->getMessage();
         else $errors[] = $ex->getMessage();
     }
 }
