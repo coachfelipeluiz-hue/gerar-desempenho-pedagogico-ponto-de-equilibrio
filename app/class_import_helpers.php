@@ -41,6 +41,21 @@ function class_csv_read(string $path): array {
     if (!$header) { fclose($fh); throw new RuntimeException('Cabeçalho não encontrado.'); }
     $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$header[0]);
     $header = array_map(static fn($v) => trim((string)$v), $header);
+    // O formulário envia o texto do cabeçalho como valor do campo; cabeçalhos
+    // duplicados tornariam impossível distinguir com segurança as colunas.
+    $normalizedHeaders = [];
+    foreach ($header as $index => $headerValue) {
+        $normalized = class_norm_header((string)$headerValue);
+        if ($normalized === '') {
+            fclose($fh);
+            throw new RuntimeException('O cabeçalho contém uma coluna sem nome na posição ' . ($index + 1) . '. Corrija o CSV e envie novamente.');
+        }
+        if (isset($normalizedHeaders[$normalized])) {
+            fclose($fh);
+            throw new RuntimeException('O cabeçalho contém colunas duplicadas ou equivalentes: "' . $headerValue . '" (colunas ' . ($normalizedHeaders[$normalized] + 1) . ' e ' . ($index + 1) . '). Renomeie-as para que o mapeamento seja inequívoco.');
+        }
+        $normalizedHeaders[$normalized] = $index;
+    }
     $rows = [];
     $line = 1;
     while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\')) !== false) {
