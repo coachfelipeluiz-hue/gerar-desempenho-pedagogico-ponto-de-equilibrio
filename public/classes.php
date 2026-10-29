@@ -71,7 +71,7 @@ $params = [$end, $start, $start, $end];
 if ($unitFilter) {
     $ph = implode(',', array_fill(0, count($unitFilter), '?'));
     $sql .= " AND EXISTS (SELECT 1 FROM polo_subsede_history h WHERE h.polo_id=cl.polo_id AND h.subsede_id IN ($ph) AND h.valid_from <= COALESCE(cl.competence, ?) AND (h.valid_until IS NULL OR h.valid_until >= COALESCE(cl.competence, ?)))";
-    array_push($params, ...$unitFilter, $end, $start);
+    $params = array_merge($params, $unitFilter, [$end, $start]);
 } elseif (!$isMaster) {
     $sql .= ' AND 1=0';
 }
