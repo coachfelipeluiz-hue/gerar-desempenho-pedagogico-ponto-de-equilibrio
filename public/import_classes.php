@@ -185,14 +185,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$existing && $map['polo'] >= 0 && $poloName !== '') {
                     $classFindName->execute([$name, (int)$poloId]);
                     $matches = $classFindName->fetchAll();
-                    if (count($matches) > 1) throw new RuntimeException('O nome e polo da linha ' . $item['line'] . ' correspondem a mais de uma turma no banco.');
-                    $existing = $matches[0] ?? null;
+                    if ($matches) throw new RuntimeException('A linha ' . $item['line'] . ' corresponde por nome e polo a uma turma existente, mas não por código de origem. Mapeie o código ou resolva a identidade antes de importar.');
                 }
                 if (!$existing && ($map['polo'] < 0 || $poloName === '')) {
                     $classFindNameOnly->execute([$name]);
                     $matches = $classFindNameOnly->fetchAll();
-                    if (count($matches) > 1) throw new RuntimeException('O nome da linha ' . $item['line'] . ' é ambíguo. Mapeie código de origem ou polo para identificar a turma.');
-                    $existing = $matches[0] ?? null;
+                    if ($matches) throw new RuntimeException('O nome da linha ' . $item['line'] . ' já existe no banco, mas não há código de origem para atualizar com segurança. Mapeie o código ou resolva a identidade antes de importar.');
                 }
                 $existingId = $existing ? (int)$existing['id'] : null;
                 if ($existing && $code !== '' && trim((string)($existing['source_code'] ?? '')) !== ''
@@ -264,7 +262,7 @@ page_header('Importação de turmas');
 ?>
 <?php foreach ($messages as $m): ?><div class="notice"><strong>Sucesso:</strong> <?= e($m) ?></div><?php endforeach; ?>
 <?php foreach ($errors as $m): ?><div class="error"><?= e($m) ?></div><?php endforeach; ?>
-<div class="notice"><strong>Importação com mapeamento manual.</strong> A tela não presume o significado das colunas. Confira cada campo antes de confirmar. Em turmas existentes, campos não mapeados ou vazios são preservados. Para novas turmas, aprendizes sem valor começam em zero e outros campos opcionais ficam vazios. Duplicatas ou nomes ambíguos cancelam a importação, sem gravar alterações.</div>
+<div class="notice"><strong>Importação com mapeamento manual.</strong> A tela não presume o significado das colunas. Confira cada campo antes de confirmar. Em turmas existentes, campos opcionais não mapeados ou vazios são preservados; atualizações exigem código de origem. Correspondência sem código, duplicatas ou nomes ambíguos bloqueiam o lote. Para novas turmas, aprendizes sem valor começam em zero e outros campos opcionais ficam vazios.</div>
 <section class="panel">
 <h2>1. Enviar CSV de turmas</h2>
 <p class="muted">Aceita CSV separado por vírgula, ponto e vírgula ou tabulação. Limite de 25 MB. O arquivo é lido para prévia e só grava no banco após confirmação.</p>
