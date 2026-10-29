@@ -69,9 +69,16 @@ function class_header_guess(array $header, array $aliases): string {
 function class_int_value(mixed $v): ?int {
     $s = trim((string)$v);
     if ($s === '') return null;
-    $s = preg_replace('/[^0-9-]/', '', $s);
-    if ($s === '' || !preg_match('/^-?\d+$/', $s)) return null;
-    return max(0, min(1000000, (int)$s));
+    // Aceita inteiro simples ou separadores de milhar consistentes; não remove
+    // letras/símbolos arbitrariamente, pois isso poderia transformar "12abc" em 12.
+    if (preg_match('/^-?\d+$/', $s)) {
+        $normalized = $s;
+    } elseif (preg_match('/^-?\d{1,3}(?:[., ]\d{3})+$/', $s)) {
+        $normalized = str_replace([',', '.', ' '], '', $s);
+    } else {
+        return null;
+    }
+    return max(0, min(1000000, (int)$normalized));
 }
 function class_date_value(mixed $v): ?string {
     $s = trim((string)$v);
