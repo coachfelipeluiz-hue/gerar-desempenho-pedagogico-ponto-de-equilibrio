@@ -210,8 +210,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     else $groupId = (int)$groupId;
                 }
                 $existingId = false;
-                if ($code !== '') { $classFindCode->execute([$code]); $existingId = $classFindCode->fetchColumn(); }
-                if (!$existingId) { $classFindName->execute([$name,$poloId]); $existingId = $classFindName->fetchColumn(); }
+                if ($code !== '') {
+                    $classFindCode->execute([$code]);
+                    $existingId = $classFindCode->fetchColumn();
+                } else {
+                    $classFindName->execute([$name,$poloId]);
+                    $existingId = $classFindName->fetchColumn();
+                }
                 if ($existingId) {
                     $classUpdate->execute([$name,$groupId,$poloId,$course !== '' ? $course : null,$apprentices,$capacity,$status !== '' ? $status : null,$competence,$batchId,(int)$existingId]);
                 } else {
