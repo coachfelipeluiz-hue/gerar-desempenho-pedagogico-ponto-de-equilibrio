@@ -52,6 +52,18 @@ function parse_nonnegative_id(mixed $value): int {
     return $id;
 }
 
+function pending_preview_matches(mixed $pending, mixed $submitted): bool {
+    if (!is_array($pending)) {
+        return false;
+    }
+
+    $expected = $pending['preview_token'] ?? null;
+    return is_string($expected)
+        && preg_match('/\A[a-f0-9]{64}\z/', $expected) === 1
+        && is_string($submitted)
+        && hash_equals($expected, $submitted);
+}
+
 function app_base_path(): string {
     $script = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
     $publicPos = strpos($script, '/public/');

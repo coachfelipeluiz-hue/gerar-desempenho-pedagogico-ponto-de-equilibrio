@@ -43,14 +43,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (count($sample) < 8) $sample[] = ['contrato'=>$contract, 'subsede'=>$subName, 'polo'=>trim((string)($row[$map['10 Polo (Local Curso)']] ?? '')), 'empresa'=>trim((string)($row[$map['12 Empresa']] ?? '')), 'mensal'=>is_finite($amount) ? $amount : null, 'desligado'=>trim((string)($row[$map['17 Desligado']] ?? ''))];
                 }
                 if (!$headerSeen) throw new RuntimeException('Não há registros no CSV.');
-                $_SESSION['pending_contract_import'] = ['path'=>$target, 'name'=>basename((string)$f['name']), 'rows'=>$rows, 'valid'=>$valid, 'invalid'=>$invalid];
-                $preview = ['rows'=>$rows, 'valid'=>$valid, 'invalid'=>$invalid, 'sample'=>$sample];
+                $pending = [
+                    'path'=>$target,
+                    'name'=>basename((string)$f['name']),
+                    'rows'=>$rows,
+                    'valid'=>$valid,
+                    'invalid'=>$invalid,
+                    'preview_token'=>bin2hex(random_bytes(32)),
+                ];
+                $previous = $_SESSION['pending_contract_import'] ?? null;
+                if (is_array($previous) && !empty($previous['path']) && $previous['path'] !== $target) @unlink((string)$previous['path']);
+                $_SESSION['pending_contract_import'] = $pending;
+                $preview = ['rows'=>$rows, 'valid'=>$valid, 'invalid'=>$invalid, 'sample'=>$sample, 'preview_token'=>$pending['preview_token']];
             } catch (Throwable $e) { $errors[] = $e->getMessage(); }
         }
     } elseif (($_POST['action'] ?? '') === 'confirm') {
         $pending = $_SESSION['pending_contract_import'] ?? null;
         if (!$pending || !is_file((string)($pending['path'] ?? ''))) {
             $errors[] = 'Não há arquivo pendente. Envie o CSV novamente.';
+        } elseif (!pending_preview_matches($pending, $_POST['preview_token'] ?? null)) {
+            $errors[] = 'A prévia expirou ou mudou. Confira o arquivo novamente antes de confirmar.';
         } elseif (($pending['invalid'] ?? 0) > 0 && empty($_POST['skip_invalid'])) {
             $errors[] = 'Existem linhas inválidas. Marque a opção para ignorá-las ou envie uma base corrigida.';
         } elseif (!$pdo instanceof PDO) {
@@ -130,7 +142,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 if (!$preview && !empty($_SESSION['pending_contract_import'])) {
     $p = $_SESSION['pending_contract_import'];
-    $preview = ['rows'=>$p['rows'],'valid'=>$p['valid'],'invalid'=>$p['invalid'],'sample'=>[]];
+    if (!pending_preview_matches($p, $p['preview_token'] ?? null)) {
+        $p['preview_token'] = bin2hex(random_bytes(32));
+        $_SESSION['pending_contract_import'] = $p;
+    }
+    $preview = ['rows'=>$p['rows'],'valid'=>$p['valid'],'invalid'=>$p['invalid'],'sample'=>[],'preview_token'=>$p['preview_token']];
 }
 page_header('Importação de dados');
 ?>
@@ -141,7 +157,7 @@ page_header('Importação de dados');
 <form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="upload"><label for="csv_file">Arquivo CSV</label><input id="csv_file" type="file" name="csv_file" accept=".csv,text/csv" required><p><button type="submit">Enviar e validar CSV</button></p></form></div>
 <?php if ($preview): ?><div class="panel"><h2>2. Prévia da importação</h2><div class="stats"><div class="stat"><span>Linhas lidas</span><strong><?= (int)$preview['rows'] ?></strong></div><div class="stat"><span>Válidas</span><strong><?= (int)$preview['valid'] ?></strong></div><div class="stat"><span>Inválidas</span><strong><?= (int)$preview['invalid'] ?></strong></div></div>
 <?php if (!empty($preview['sample'])): ?><div class="table-wrap"><table><thead><tr><th>Contrato</th><th>Subsede</th><th>Polo</th><th>Empresa</th><th>Valor mensal</th><th>Desligado?</th></tr></thead><tbody><?php foreach ($preview['sample'] as $r): ?><tr><td><?= e($r['contrato']) ?></td><td><?= e($r['subsede']) ?></td><td><?= e($r['polo']) ?></td><td><?= e($r['empresa']) ?></td><td><?= $r['mensal'] === null ? 'Inválido' : 'R$ ' . number_format((float)$r['mensal'],2,',','.') ?></td><td><?= e($r['desligado']) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?>
-<form method="post"><input type="hidden" name="csrf" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="confirm"><?php if ((int)$preview['invalid'] > 0): ?><label><input type="checkbox" name="skip_invalid" value="1" required> Ignorar as linhas inválidas e importar somente as válidas.</label><?php endif; ?><p><button type="submit">Confirmar e importar para o banco</button></p></form></div><?php endif; ?>
+<form method="post"><input type="hidden" name="csrf" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="confirm"><input type="hidden" name="preview_token" value="<?= e($preview['preview_token']) ?>"><?php if ((int)$preview['invalid'] > 0): ?><label><input type="checkbox" name="skip_invalid" value="1" required> Ignorar as linhas inválidas e importar somente as válidas.</label><?php endif; ?><p><button type="submit">Confirmar e importar para o banco</button></p></form></div><?php endif; ?>
 <div class="panel"><h2>Próximas fontes</h2>
 <div class="import-row"><div><strong>Turmas (CSV)</strong><p class="muted">A base recebida tem um campo em que informações de turma/curso/vagas parecem concatenadas. Vamos resolver o mapeamento antes de importar para não gravar dados incorretos.</p></div><span class="pill">Em análise</span></div>
 <div class="import-row"><div><strong>Base de instrutores (XLSX)</strong><p class="muted">Cadastro por nome, cargo, categoria e departamento. Custos-hora e alocação por turma serão informados separadamente.</p></div><span class="pill">Próxima etapa</span></div></div>

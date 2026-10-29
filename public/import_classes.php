@@ -93,14 +93,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!move_uploaded_file($f['tmp_name'], $target)) throw new RuntimeException('Não foi possível guardar o arquivo. Verifique storage/uploads.');
             $parsed = class_csv_read($target);
             if (count($parsed['header']) < 2 || !$parsed['rows']) { @unlink($target); throw new RuntimeException('O CSV precisa ter cabeçalho e pelo menos uma linha de dados.'); }
-            $pending = ['path'=>$target,'name'=>basename((string)$f['name']),'header'=>$parsed['header'],'delimiter'=>$parsed['delimiter'],'rows'=>count($parsed['rows']),'sample'=>array_slice($parsed['rows'],0,6),'uploaded_at'=>time()];
+            $pending = ['path'=>$target,'name'=>basename((string)$f['name']),'header'=>$parsed['header'],'delimiter'=>$parsed['delimiter'],'rows'=>count($parsed['rows']),'sample'=>array_slice($parsed['rows'],0,6),'uploaded_at'=>time(),'preview_token'=>bin2hex(random_bytes(32))];
+            $previous = $_SESSION['pending_classes_import'] ?? null;
+            if (is_array($previous) && !empty($previous['path']) && $previous['path'] !== $target) @unlink((string)$previous['path']);
             $_SESSION['pending_classes_import'] = $pending;
         } elseif ($action === 'cancel') {
-            if ($pending && !empty($pending['path'])) @unlink($pending['path']);
+            if (!$pending || !is_file((string)($pending['path'] ?? '')) || !pending_preview_matches($pending, $_POST['preview_token'] ?? null)) {
+                throw new RuntimeException('A prévia expirou ou mudou. Atualize a página antes de cancelar.');
+            }
+            @unlink((string)$pending['path']);
             unset($_SESSION['pending_classes_import']);
             $pending = null;
             $messages[] = 'Prévia cancelada. Nenhuma turma foi importada.';
         } elseif ($action === 'confirm' && $pending && is_file((string)$pending['path'])) {
+            if (!pending_preview_matches($pending, $_POST['preview_token'] ?? null)) throw new RuntimeException('A prévia expirou ou mudou. Confira o arquivo novamente antes de confirmar.');
             if (($_POST['confirm_mapping'] ?? '') !== '1') throw new RuntimeException('Marque a confirmação do mapeamento antes de importar.');
             $header = $pending['header'];
             $fields = ['source_code','name','course_name','subsede','polo','active_apprentices','capacity','status','competence'];
@@ -245,6 +251,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 $pending = $_SESSION['pending_classes_import'] ?? null;
+if ($pending && !pending_preview_matches($pending, $pending['preview_token'] ?? null)) {
+    $pending['preview_token'] = bin2hex(random_bytes(32));
+    $_SESSION['pending_classes_import'] = $pending;
+}
 $fieldsMeta = [
  'source_code'=>['Código da turma',['codigo','codigodaturma','codturma','turmaid','idturma','sourcecode']],
  'name'=>['Nome da turma (obrigatório)',['turma','nometurma','nomedaturma','nome','class','classname','grupo']],
@@ -277,7 +287,7 @@ page_header('Importação de turmas');
 <h2>2. Conferir colunas e prévia</h2>
 <p><strong>Arquivo:</strong> <?= e($pending['name']) ?> · <strong>Linhas:</strong> <?= (int)$pending['rows'] ?> · <strong>Colunas detectadas:</strong> <?= count($pending['header']) ?></p>
 <form method="post">
-<input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="confirm">
+<input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="confirm"><input type="hidden" name="preview_token" value="<?= e($pending['preview_token']) ?>">
 <div class="filters">
 <?php foreach ($fieldsMeta as $field=>$meta): ?>
 <label><?= e($meta[0]) ?><?= $field==='name' ? ' *' : '' ?>
@@ -295,7 +305,7 @@ page_header('Importação de turmas');
 <p><label><input type="checkbox" name="confirm_mapping" value="1" required> Conferi o mapeamento e a amostra antes de importar.</label></p>
 <p><button type="submit">Confirmar e importar turmas</button></p>
 </form>
-<form method="post"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="cancel"><button type="submit">Cancelar prévia</button></form>
+<form method="post"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="cancel"><input type="hidden" name="preview_token" value="<?= e($pending['preview_token']) ?>"><button type="submit">Cancelar prévia</button></form>
 </section>
 <?php endif; ?>
 <?php page_footer(); ?>
