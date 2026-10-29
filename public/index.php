@@ -109,10 +109,19 @@ $stmt = $pdo->prepare("SELECT COUNT(*) AS class_count, COALESCE(SUM(cl.active_ap
 $stmt->execute($classParams);
 $classMetrics = $stmt->fetch() ?: ['class_count' => 0, 'apprentices' => 0];
 $classesBelow = 0;
+$classesRegular = 0;
+$classesOptimal = 0;
 if ((int)$classMetrics['class_count'] > 0) {
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM classes cl" . $classWhere . " AND cl.active_apprentices < 15");
+    $stmt = $pdo->prepare("SELECT
+        SUM(CASE WHEN COALESCE(cl.active_apprentices, 0) < 15 THEN 1 ELSE 0 END) AS below_minimum,
+        SUM(CASE WHEN COALESCE(cl.active_apprentices, 0) BETWEEN 15 AND 25 THEN 1 ELSE 0 END) AS regular_range,
+        SUM(CASE WHEN COALESCE(cl.active_apprentices, 0) > 25 THEN 1 ELSE 0 END) AS optimal_range
+        FROM classes cl" . $classWhere);
     $stmt->execute($classParams);
-    $classesBelow = (int)$stmt->fetchColumn();
+    $classQuality = $stmt->fetch() ?: [];
+    $classesBelow = (int)($classQuality['below_minimum'] ?? 0);
+    $classesRegular = (int)($classQuality['regular_range'] ?? 0);
+    $classesOptimal = (int)($classQuality['optimal_range'] ?? 0);
 }
 
 $costWhere = ' WHERE ce.competence >= ? AND ce.competence <= ?';
@@ -191,7 +200,9 @@ page_header('Visão geral');
 
 <section class="cards">
     <article class="card"><span>Aprendizes registrados</span><strong><?= number_format((int)$classMetrics['apprentices'], 0, ',', '.') ?></strong><small>Somatório das turmas na competência selecionada</small></article>
-    <article class="card"><span>Turmas abaixo de 15</span><strong><?= number_format($classesBelow, 0, ',', '.') ?></strong><small><?= (int)$classMetrics['class_count'] ?> turmas com competência informada</small></article>
+    <article class="card"><span>Turmas abaixo do mínimo (&lt; 15)</span><strong><?= number_format($classesBelow, 0, ',', '.') ?></strong><small>Atenção: abaixo do mínimo operacional</small></article>
+    <article class="card"><span>Turmas na faixa regular (15 a 25)</span><strong><?= number_format($classesRegular, 0, ',', '.') ?></strong><small>Dentro da faixa mínima, mas sem ultrapassar 25 jovens</small></article>
+    <article class="card"><span>Turmas ótimas (&gt; 25)</span><strong><?= number_format($classesOptimal, 0, ',', '.') ?></strong><small>Mais de 25 jovens</small></article>
     <article class="card"><span>Média por turma</span><strong><?= number_format($average, 1, ',', '.') ?></strong><small>Aprendizes ÷ turmas com competência</small></article>
     <article class="card"><span>Receita mensal contratual</span><strong><?= e($money($revenue)) ?></strong><small><?= (int)$contractMetrics['contract_count'] ?> contratos vigentes na competência</small></article>
     <article class="card"><span>Custos conhecidos</span><strong><?= e($money($knownCosts)) ?></strong><small>Custos cadastrados + horas de instrução aprovadas</small></article>
