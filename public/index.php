@@ -4,6 +4,13 @@ declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
+if (!can_access_module('dashboard')) {
+    http_response_code(403);
+    page_header('Acesso negado');
+    echo '<div class="error">Você não tem permissão para acessar a visão geral.</div>';
+    page_footer();
+    exit;
+}
 
 $user = current_user();
 if (!$pdo instanceof PDO) {
