@@ -144,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($map as $field => $index) {
                 if ($index < 0) continue;
                 if (isset($mapped[$index])) {
-                    throw new RuntimeException('A mesma coluna foi atribuída a dois campos (' . $fields[$index] . ' e ' . $field . '). Revise o mapeamento antes de importar.');
+                    throw new RuntimeException('A mesma coluna foi atribuída a dois campos (' . $mapped[$index] . ' e ' . $field . '). Revise o mapeamento antes de importar.');
                 }
                 $mapped[$index] = $field;
             }
