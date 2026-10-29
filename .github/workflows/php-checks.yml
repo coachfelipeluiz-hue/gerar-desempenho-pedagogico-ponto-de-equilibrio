@@ -1,0 +1,39 @@
+name: PHP checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - gpt/web-erp-reference-plan
+
+jobs:
+  php-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, pdo_mysql
+          coverage: none
+
+      - name: Syntax check all PHP files
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            php -l "$file"
+          done < <(find . -type f -name '*.php' -not -path './vendor/*' -print0)
+
+      - name: Run financial calculator tests
+        run: php tests/test-financial-calculator.php
+
+      - name: Run class CSV importer tests
+        run: php tests/test-class-csv-import.php
+
+      - name: Validate synthetic fixture arithmetic
+        run: php tests/validate-fixture.php

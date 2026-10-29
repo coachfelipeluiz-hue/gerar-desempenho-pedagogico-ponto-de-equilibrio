@@ -1,0 +1,278 @@
+{
+  "dataset": "GERAR_PONTO_EQUILIBRIO_SINTETICO_V1",
+  "notice": "Todos os dados são fictícios. Não importar em produção.",
+  "competencies": [
+    "2026-03",
+    "2026-04"
+  ],
+  "units": [
+    {
+      "id": "SUB-A",
+      "name": "Subsede Aurora",
+      "capacity_by_competence": {
+        "2026-03": 100,
+        "2026-04": 100
+      }
+    },
+    {
+      "id": "SUB-B",
+      "name": "Subsede Horizonte",
+      "capacity_by_competence": {
+        "2026-03": 80,
+        "2026-04": 80
+      }
+    }
+  ],
+  "polo_history": [
+    {
+      "polo_id": "POLO-01",
+      "subsede_id": "SUB-A",
+      "valid_from": "2026-01-01",
+      "valid_until": "2026-03-31"
+    },
+    {
+      "polo_id": "POLO-01",
+      "subsede_id": "SUB-B",
+      "valid_from": "2026-04-01",
+      "valid_until": null
+    },
+    {
+      "polo_id": "POLO-02",
+      "subsede_id": "SUB-A",
+      "valid_from": "2026-01-01",
+      "valid_until": null
+    }
+  ],
+  "courses": [
+    {
+      "id": "FR",
+      "name": "Frentista",
+      "operational_target": 15
+    },
+    {
+      "id": "AP",
+      "name": "Auxiliar de Produção",
+      "operational_target": 15
+    }
+  ],
+  "classes": [
+    {
+      "id": "T-FR-01",
+      "polo_id": "POLO-01",
+      "course_id": "FR",
+      "competence": "2026-03",
+      "active_youths": 3,
+      "capacity": 25
+    },
+    {
+      "id": "T-FR-02",
+      "polo_id": "POLO-01",
+      "course_id": "FR",
+      "competence": "2026-04",
+      "active_youths": 15,
+      "capacity": 25
+    },
+    {
+      "id": "T-AP-01",
+      "polo_id": "POLO-02",
+      "course_id": "AP",
+      "competence": "2026-03",
+      "active_youths": 14,
+      "capacity": 25
+    },
+    {
+      "id": "T-AP-02",
+      "polo_id": "POLO-02",
+      "course_id": "AP",
+      "competence": "2026-04",
+      "active_youths": 26,
+      "capacity": 25
+    }
+  ],
+  "contracts": [
+    {
+      "id": "CT-001",
+      "class_id": "T-FR-01",
+      "polo_id": "POLO-01",
+      "monthly_value": 300,
+      "start_date": "2026-03-01",
+      "end_date": "2026-03-10",
+      "status": "Desligado",
+      "competence": "2026-03"
+    },
+    {
+      "id": "CT-002",
+      "class_id": "T-FR-01",
+      "polo_id": "POLO-01",
+      "monthly_value": 300,
+      "start_date": "2026-03-01",
+      "end_date": null,
+      "status": "Ativo",
+      "competence": "2026-03"
+    },
+    {
+      "id": "CT-003",
+      "class_id": "T-FR-02",
+      "polo_id": "POLO-01",
+      "monthly_value": 300,
+      "start_date": "2026-04-01",
+      "end_date": null,
+      "status": "Ativo",
+      "competence": "2026-04"
+    },
+    {
+      "id": "CT-004",
+      "class_id": "T-AP-01",
+      "polo_id": "POLO-02",
+      "monthly_value": 320,
+      "start_date": "2026-03-01",
+      "end_date": null,
+      "status": "Ativo",
+      "competence": "2026-03"
+    },
+    {
+      "id": "CT-005",
+      "class_id": null,
+      "polo_id": null,
+      "monthly_value": 280,
+      "start_date": "2026-03-12",
+      "end_date": null,
+      "status": "Ativo",
+      "competence": "2026-03",
+      "expected_flag": "pendencia_atribuicao"
+    }
+  ],
+  "instructor_costs": [
+    {
+      "id": "IC-001",
+      "class_id": "T-FR-01",
+      "competence": "2026-03",
+      "method": "direct_total",
+      "total_value": 480,
+      "source_key": "SERVICE-FR-03",
+      "status": "pendente"
+    },
+    {
+      "id": "IC-002",
+      "class_id": "T-FR-01",
+      "competence": "2026-03",
+      "method": "hours_rate",
+      "hours": 12,
+      "hourly_rate": 40,
+      "calculated_value": 480,
+      "source_key": "SERVICE-FR-03",
+      "status": "pendente",
+      "expected_flag": "possible_duplicate_with_IC-001"
+    }
+  ],
+  "costs": [
+    {
+      "id": "C-001",
+      "scope": "institution",
+      "competence": "2026-03",
+      "category": "fixed",
+      "amount": 38000,
+      "synthetic_example_only": true
+    },
+    {
+      "id": "C-002",
+      "scope": "class",
+      "class_id": "T-FR-01",
+      "competence": "2026-03",
+      "category": "variable_per_youth",
+      "unit_amount": 85,
+      "synthetic_example_only": true
+    }
+  ],
+  "expected_results": {
+    "dataset_checks": {
+      "contract_records": 5,
+      "contract_monthly_values_sum": 1500,
+      "attributed_contract_monthly_values_sum": 1220,
+      "revenue_by_competence_integral_all_records": {
+        "2026-03": 1200,
+        "2026-04": 300
+      },
+      "historical_assignment": {
+        "polo_id": "POLO-01",
+        "2026-03": "SUB-A",
+        "2026-04": "SUB-B"
+      },
+      "frentista_turma_3_youths": {
+        "target": 15,
+        "additional_youths_needed": 12
+      },
+      "partial_contract_example": {
+        "monthly_value": 300,
+        "active_days": 10,
+        "period_days": 30,
+        "integral_value": 300,
+        "proportional_value": 100
+      },
+      "instructor_duplicate_example": {
+        "direct_total": 480,
+        "hours": 12,
+        "hourly_rate": 40,
+        "hours_total": 480,
+        "expected_combined_total_if_deduplicated": 480,
+        "must_flag_possible_duplicate": true
+      },
+      "capacity_example": {
+        "capacity": 100,
+        "youths": 112,
+        "occupancy_percent": 112,
+        "over_capacity_by": 12
+      }
+    },
+    "independent_scenarios": {
+      "note": "Os cálculos abaixo são cenários aritméticos isolados; não são agregações dos arrays contracts, instructor_costs ou costs do dataset principal.",
+      "average_example": {
+        "revenue_total": 3000,
+        "contract_count": 10,
+        "average_per_contract": 300,
+        "class_youth_counts": [
+          8,
+          12
+        ],
+        "average_youths_per_class": 10
+      },
+      "contribution_margin_example": {
+        "revenue": 10000,
+        "variable_costs": 6000,
+        "contribution_margin": 4000,
+        "contribution_margin_percent": 0.4
+      },
+      "consolidated_example": {
+        "revenue": 18000,
+        "costs": 16500,
+        "result": 1500
+      },
+      "subsede_examples": [
+        {
+          "subsede": "SUB-A",
+          "revenue": 10000,
+          "costs": 7000,
+          "result": 3000
+        },
+        {
+          "subsede": "SUB-B",
+          "revenue": 8000,
+          "costs": 9500,
+          "result": -1500
+        }
+      ]
+    },
+    "arithmetic_validation": {
+      "method": "Validar cada resultado por fórmula direta sobre valores declarados; dataset_checks deriva dos registros deste arquivo. independent_scenarios são calculados somente a partir dos números explícitos de cada cenário.",
+      "formulas": [
+        "Soma de contratos = soma(monthly_value)",
+        "Média por contrato = receita / quantidade de contratos",
+        "Média de jovens por turma = soma de jovens / quantidade de turmas",
+        "Margem de contribuição = receita - custos variáveis",
+        "Percentual de margem = margem de contribuição / receita",
+        "Resultado consolidado = receita - custos"
+      ],
+      "executed_validation": "JSON parseado e fórmulas reproduzidas por validação externa em JavaScript; ainda não representa teste PHP ou teste funcional da aplicação."
+    }
+  }
+}

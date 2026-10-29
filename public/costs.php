@@ -44,6 +44,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$name, $type, $level]);
             audit($pdo, (int)$user['id'], 'create', 'cost_category', (int)$pdo->lastInsertId(), ['name'=>$name,'cost_type'=>$type,'attribution_level'=>$level]);
             $messages[] = 'Categoria cadastrada.';
+        } elseif ($action === 'review_cost') {
+            if (($user['role'] ?? '') !== 'master') throw new RuntimeException('Somente o Master pode aprovar ou rejeitar custos.');
+            $entryId = (int)($_POST['entry_id'] ?? 0);
+            $decision = (string)($_POST['decision'] ?? '');
+            $reviewNote = trim((string)($_POST['review_note'] ?? ''));
+            if ($entryId < 1 || !in_array($decision, ['approved', 'rejected'], true)) throw new RuntimeException('Decisão de revisão inválida.');
+            if (mb_strlen($reviewNote) > 500) throw new RuntimeException('A observação da revisão deve ter até 500 caracteres.');
+            $check = $pdo->prepare('SELECT id, status FROM cost_entries WHERE id = ?');
+            $check->execute([$entryId]);
+            $entry = $check->fetch();
+            if (!$entry) throw new RuntimeException('Lançamento de custo não encontrado.');
+            if ($entry['status'] !== 'pending') throw new RuntimeException('Somente lançamentos pendentes podem ser revisados.');
+            $stmt = $pdo->prepare('UPDATE cost_entries SET status = ?, reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ? AND status = ?');
+            $stmt->execute([$decision, (int)$user['id'], $reviewNote !== '' ? $reviewNote : null, $entryId, 'pending']);
+            if ($stmt->rowCount() !== 1) throw new RuntimeException('O lançamento foi alterado por outro processo. Atualize a página.');
+            audit($pdo, (int)$user['id'], 'review_' . $decision, 'cost_entry', $entryId, ['review_note'=>$reviewNote]);
+            $messages[] = $decision === 'approved' ? 'Custo aprovado.' : 'Custo rejeitado.';
         } elseif ($action === 'save_cost') {
             $categoryId = (int)($_POST['category_id'] ?? 0);
             $amountRaw = trim((string)($_POST['amount'] ?? ''));
@@ -85,7 +102,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $foundSubsede = $stmt->fetchColumn();
                 if ($foundSubsede) $subsedeId = (int)$foundSubsede;
             }
-            $stmt = $pdo->prepare('INSERT INTO cost_entries (category_id, amount, competence, class_id, polo_id, subsede_id, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            $stmt = $pdo->prepare("INSERT INTO cost_entries (category_id, amount, competence, class_id, polo_id, subsede_id, notes, source_type, calculation_method, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, 'manual', 'manual_total', 'pending', ?)");
             $stmt->execute([$categoryId, $amount, $competence . '-01', $classId, $poloId, $subsedeId, $notes !== '' ? $notes : null, (int)$user['id']]);
             $id = (int)$pdo->lastInsertId();
             audit($pdo, (int)$user['id'], 'create', 'cost_entry', $id, ['category_id'=>$categoryId,'amount'=>$amount,'competence'=>$competence,'subsede_id'=>$subsedeId,'polo_id'=>$poloId,'class_id'=>$classId]);
@@ -111,7 +128,7 @@ $month = (string)($_GET['competence'] ?? date('Y-m'));
 if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month)) $month = date('Y-m');
 $start = $month . '-01';
 $end = date('Y-m-t', strtotime($start));
-$sql = 'SELECT ce.id, ce.amount, ce.competence, ce.notes, cc.name AS category_name, cc.cost_type, cc.attribution_level, s.name AS subsede_name, p.name AS polo_name, cl.name AS class_name
+$sql = 'SELECT ce.id, ce.amount, ce.competence, ce.notes, ce.status, ce.source_type, ce.calculation_method, ce.review_note, cc.name AS category_name, cc.cost_type, cc.attribution_level, s.name AS subsede_name, p.name AS polo_name, cl.name AS class_name
  FROM cost_entries ce
  INNER JOIN cost_categories cc ON cc.id = ce.category_id
  LEFT JOIN subsedes s ON s.id = ce.subsede_id
@@ -133,7 +150,9 @@ $sql .= ' ORDER BY ce.competence DESC, ce.id DESC';
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $entries = $stmt->fetchAll();
-$total = array_sum(array_map(static fn($r) => (float)$r['amount'], $entries));
+$approvedTotal = array_sum(array_map(static fn($r) => $r['status'] === 'approved' ? (float)$r['amount'] : 0.0, $entries));
+$pendingTotal = array_sum(array_map(static fn($r) => $r['status'] === 'pending' ? (float)$r['amount'] : 0.0, $entries));
+$rejectedTotal = array_sum(array_map(static fn($r) => $r['status'] === 'rejected' ? (float)$r['amount'] : 0.0, $entries));
 $money = static fn($v) => 'R$ ' . number_format((float)$v, 2, ',', '.');
 page_header('Custos');
 ?>
@@ -198,17 +217,21 @@ page_header('Custos');
         <label>Competência<input type="month" name="competence" value="<?= e($month) ?>"></label>
         <div style="align-self:end"><button type="submit">Consultar</button></div>
     </form>
-    <p><strong>Total registrado: <?= e($money($total)) ?></strong> · <?= count($entries) ?> lançamentos</p>
+    <p><strong>Total aprovado: <?= e($money($approvedTotal)) ?></strong> · Pendente: <?= e($money($pendingTotal)) ?> · Rejeitado: <?= e($money($rejectedTotal)) ?> · <?= count($entries) ?> lançamentos</p>
+    <p class="muted">Somente custos aprovados devem alimentar os cálculos financeiros. Novos lançamentos ficam pendentes até revisão do Master.</p>
     <div style="overflow-x:auto">
     <table>
-        <thead><tr><th>Competência</th><th>Categoria</th><th>Tipo</th><th>Atribuição</th><th>Subsede</th><th>Polo</th><th>Turma</th><th>Valor</th><th>Observações</th></tr></thead>
+        <thead><tr><th>Competência</th><th>Categoria</th><th>Tipo</th><th>Atribuição</th><th>Subsede</th><th>Polo</th><th>Turma</th><th>Valor</th><th>Status</th><th>Observações</th><?php if (($user['role'] ?? '') === 'master'): ?><th>Revisão</th><?php endif; ?></tr></thead>
         <tbody>
-        <?php if (!$entries): ?><tr><td colspan="9">Nenhum custo registrado nesta competência.</td></tr><?php endif; ?>
+        <?php if (!$entries): ?><tr><td colspan="<?= (($user['role'] ?? '') === 'master') ? 11 : 10 ?>">Nenhum custo registrado nesta competência.</td></tr><?php endif; ?>
         <?php foreach ($entries as $entry): ?><tr>
             <td><?= e(date('m/Y', strtotime($entry['competence']))) ?></td>
             <td><?= e($entry['category_name']) ?></td><td><?= e($entry['cost_type']) ?></td><td><?= e($entry['attribution_level']) ?></td>
             <td><?= e($entry['subsede_name'] ?? '—') ?></td><td><?= e($entry['polo_name'] ?? '—') ?></td><td><?= e($entry['class_name'] ?? '—') ?></td>
-            <td><?= e($money($entry['amount'])) ?></td><td><?= e($entry['notes'] ?? '') ?></td>
+            <td><?= e($money($entry['amount'])) ?></td><td><?= e($entry['status']) ?></td><td><?= e($entry['notes'] ?? '') ?><?= !empty($entry['review_note']) ? ' · Revisão: ' . e($entry['review_note']) : '' ?></td>
+            <?php if (($user['role'] ?? '') === 'master'): ?><td><?php if ($entry['status'] === 'pending'): ?>
+                <form method="post" style="display:grid;gap:.35rem;min-width:180px"><input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="review_cost"><input type="hidden" name="entry_id" value="<?= (int)$entry['id'] ?>"><input name="review_note" maxlength="500" placeholder="Observação (opcional)"><button name="decision" value="approved" type="submit">Aprovar</button><button name="decision" value="rejected" type="submit">Rejeitar</button></form>
+            <?php else: ?><?= e($entry['status']) ?><?php endif; ?></td><?php endif; ?>
         </tr><?php endforeach; ?>
         </tbody>
     </table>

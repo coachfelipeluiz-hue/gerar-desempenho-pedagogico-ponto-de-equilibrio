@@ -25,64 +25,7 @@ $errors = [];
 $uploadDir = dirname(__DIR__) . '/storage/uploads';
 if (!is_dir($uploadDir)) @mkdir($uploadDir, 0770, true);
 
-function class_csv_read(string $path): array {
-    $fh = fopen($path, 'rb');
-    if (!$fh) throw new RuntimeException('Não foi possível ler o CSV enviado.');
-    $first = fgets($fh);
-    if ($first === false) { fclose($fh); throw new RuntimeException('O arquivo está vazio.'); }
-    $delimiters = [',' => substr_count($first, ','), ';' => substr_count($first, ';'), "\t" => substr_count($first, "\t")];
-    arsort($delimiters);
-    $delimiter = (string)array_key_first($delimiters);
-    rewind($fh);
-    $header = fgetcsv($fh, 0, $delimiter, '"', '\\');
-    if (!$header) { fclose($fh); throw new RuntimeException('Cabeçalho não encontrado.'); }
-    $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$header[0]);
-    $header = array_map(static fn($v) => trim((string)$v), $header);
-    $rows = [];
-    $line = 1;
-    while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\')) !== false) {
-        $line++;
-        if (count($row) === 1 && trim((string)$row[0]) === '') continue;
-        $rows[] = ['line'=>$line, 'values'=>$row];
-    }
-    fclose($fh);
-    return ['header'=>$header, 'rows'=>$rows, 'delimiter'=>$delimiter];
-}
-function class_norm_header(string $v): string {
-    $v = mb_strtolower(trim($v), 'UTF-8');
-    $v = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $v) ?: $v;
-    return preg_replace('/[^a-z0-9]+/', '', $v);
-}
-function class_header_guess(array $header, array $aliases): string {
-    foreach ($header as $h) {
-        if (in_array(class_norm_header($h), $aliases, true)) return $h;
-    }
-    foreach ($header as $h) {
-        $n = class_norm_header($h);
-        foreach ($aliases as $alias) if ($alias !== '' && str_contains($n, $alias)) return $h;
-    }
-    return '';
-}
-function class_int_value(mixed $v): ?int {
-    $s = trim((string)$v);
-    if ($s === '') return null;
-    $s = preg_replace('/[^0-9-]/', '', $s);
-    if ($s === '' || !preg_match('/^-?\d+$/', $s)) return null;
-    return max(0, min(1000000, (int)$s));
-}
-function class_date_value(mixed $v): ?string {
-    $s = trim((string)$v);
-    if ($s === '') return null;
-    foreach (['Y-m-d','d/m/Y','d-m-Y','m/Y'] as $format) {
-        $d = DateTimeImmutable::createFromFormat('!' . $format, $s);
-        if ($d && $d->format($format) === $s) return $format === 'm/Y' ? $d->format('Y-m-01') : $d->format('Y-m-d');
-    }
-    return null;
-}
-function class_value(array $row, array $map, string $field): string {
-    $idx = $map[$field] ?? -1;
-    return $idx >= 0 ? trim((string)($row[$idx] ?? '')) : '';
-}
+require_once __DIR__ . '/../app/class_import_helpers.php';
 
 $pending = $_SESSION['pending_classes_import'] ?? null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -117,7 +60,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($map['name'] < 0) throw new RuntimeException('Selecione a coluna que contém o nome da turma.');
             if ($map['polo'] < 0 && $map['subsede'] >= 0) throw new RuntimeException('Você selecionou a subsede, mas não o polo. Se o arquivo não contém polos, deixe ambos sem mapeamento.');
+            $mapped = [];
+            foreach ($map as $field => $index) {
+                if ($index < 0) continue;
+                if (isset($mapped[$index])) {
+                    throw new RuntimeException('A mesma coluna foi atribuída a dois campos (' . $mapped[$index] . ' e ' . $field . '). Revise o mapeamento antes de importar.');
+                }
+                $mapped[$index] = $field;
+            }
             $parsed = class_csv_read((string)$pending['path']);
+            if (count($parsed['header']) !== count($header)) throw new RuntimeException('O cabeçalho do CSV mudou desde a prévia. Envie o arquivo novamente.');
+            $preflightErrors = [];
+            $seenCodes = [];
+            $seenIdentities = [];
+            // Verifica ambiguidades no banco existente antes de abrir a transação.
+            $existingCodeCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE source_code = ?');
+            $existingIdentityCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE name = ? AND (polo_id <=> ?)');
+            $existingIdentityRows = $pdo->prepare('SELECT id, source_code FROM classes WHERE name = ? AND (polo_id <=> ?) ORDER BY id');
+            $existingPoloId = $pdo->prepare('SELECT id FROM polos WHERE name = ? ORDER BY id');
+            foreach ($parsed['rows'] as $item) {
+                $row = $item['values'];
+                $line = (int)$item['line'];
+                if (count($row) !== count($header)) {
+                    $preflightErrors[] = 'Linha ' . $line . ': contém ' . count($row) . ' campos; o cabeçalho tem ' . count($header) . '.';
+                    continue;
+                }
+                $name = class_value($row, $map, 'name');
+                if ($name === '') {
+                    $preflightErrors[] = 'Linha ' . $line . ': nome da turma vazio.';
+                    continue;
+                }
+                $invalidRow = false;
+                foreach (['active_apprentices', 'capacity'] as $numericField) {
+                    $rawNumeric = class_value($row, $map, $numericField);
+                    if ($map[$numericField] >= 0 && $rawNumeric !== '' && class_int_value($rawNumeric) === null) {
+                        $preflightErrors[] = 'Linha ' . $line . ': valor inválido para "' . $numericField . '": "' . $rawNumeric . '". Informe um número inteiro ou deixe vazio.';
+                        $invalidRow = true;
+                    }
+                }
+                $rawCompetence = class_value($row, $map, 'competence');
+                if ($map['competence'] >= 0 && $rawCompetence !== '' && class_date_value($rawCompetence) === null) {
+                    $preflightErrors[] = 'Linha ' . $line . ': data/competência inválida: "' . $rawCompetence . '". Formatos aceitos: AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA ou MM/AAAA.';
+                    $invalidRow = true;
+                }
+                if ($invalidRow) continue;
+                $code = class_value($row, $map, 'source_code');
+                if ($code !== '') {
+                    $key = mb_strtolower($code, 'UTF-8');
+                    if (isset($seenCodes[$key])) $preflightErrors[] = 'Linha ' . $line . ': código de origem duplicado no arquivo (também na linha ' . $seenCodes[$key] . '): ' . $code . '.';
+                    else $seenCodes[$key] = $line;
+                } else {
+                    $polo = mb_strtolower(class_value($row, $map, 'polo'), 'UTF-8');
+                    $identity = mb_strtolower(trim($name), 'UTF-8') . '|' . $polo;
+                    if (isset($seenIdentities[$identity])) $preflightErrors[] = 'Linha ' . $line . ': nome e polo repetidos sem código de origem (também na linha ' . $seenIdentities[$identity] . ').';
+                    else $seenIdentities[$identity] = $line;
+                }
+
+                // Não escolhe arbitrariamente entre vários registros já existentes.
+                if ($code !== '') {
+                    $existingCodeCount->execute([$code]);
+                    $codeMatches = (int)$existingCodeCount->fetchColumn();
+                    if ($codeMatches > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': o código ' . $code . ' corresponde a ' . $codeMatches . ' turmas já cadastradas. Corrija a base antes de importar.';
+                        continue;
+                    }
+                }
+                $poloNameForMatch = class_value($row, $map, 'polo');
+                $poloIdForMatch = null;
+                if ($poloNameForMatch !== '') {
+                    $existingPoloId->execute([$poloNameForMatch]);
+                    $poloMatches = $existingPoloId->fetchAll(PDO::FETCH_COLUMN);
+                    if (count($poloMatches) > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': o polo "' . $poloNameForMatch . '" corresponde a vários polos cadastrados; não é seguro identificar a turma.';
+                        continue;
+                    }
+                    if (count($poloMatches) === 1) $poloIdForMatch = (int)$poloMatches[0];
+                }
+                // A lógica atual procura por nome+polo quando o código não encontra registro.
+                $shouldFallbackToIdentity = $code === '';
+                if (!$shouldFallbackToIdentity) {
+                    $existingCodeCount->execute([$code]);
+                    $shouldFallbackToIdentity = (int)$existingCodeCount->fetchColumn() === 0;
+                }
+                if ($shouldFallbackToIdentity) {
+                    $existingIdentityCount->execute([$name, $poloIdForMatch]);
+                    $identityMatches = (int)$existingIdentityCount->fetchColumn();
+                    if ($identityMatches > 1) {
+                        $preflightErrors[] = 'Linha ' . $line . ': nome "' . $name . '" e polo "' . $poloNameForMatch . '" correspondem a ' . $identityMatches . ' turmas já cadastradas. Nenhuma delas será atualizada automaticamente.';
+                    }
+                }
+            }
+            if ($preflightErrors) {
+                $shown = array_slice($preflightErrors, 0, 12);
+                $suffix = count($preflightErrors) > count($shown) ? ' E mais ' . (count($preflightErrors) - count($shown)) . ' erro(s).' : '';
+                throw new RuntimeException("Pré-validação interrompida; nenhuma linha foi gravada:\n- " . implode("\n- ", $shown) . $suffix);
+            }
             $pdo->beginTransaction();
             $batchStmt = $pdo->prepare("INSERT INTO import_batches (source_type,file_name,status,total_rows,valid_rows,rejected_rows,uploaded_by) VALUES ('classes_csv',?,'validated',?,0,0,?)");
             $batchStmt->execute([$pending['name'],$pending['rows'],(int)(current_user()['id'] ?? 0) ?: null]);
@@ -139,7 +176,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach ($parsed['rows'] as $item) {
                 $row = $item['values'];
                 $name = class_value($row,$map,'name');
-                if ($name === '') { $skipped++; continue; }
                 $code = class_value($row,$map,'source_code');
                 $course = class_value($row,$map,'course_name');
                 $subName = class_value($row,$map,'subsede');
@@ -175,8 +211,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     else $groupId = (int)$groupId;
                 }
                 $existingId = false;
-                if ($code !== '') { $classFindCode->execute([$code]); $existingId = $classFindCode->fetchColumn(); }
-                if (!$existingId) { $classFindName->execute([$name,$poloId]); $existingId = $classFindName->fetchColumn(); }
+                if ($code !== '') {
+                    $classFindCode->execute([$code]);
+                    $existingId = $classFindCode->fetchColumn();
+                } else {
+                    $classFindName->execute([$name,$poloId]);
+                    $existingId = $classFindName->fetchColumn();
+                }
                 if ($existingId) {
                     $classUpdate->execute([$name,$groupId,$poloId,$course !== '' ? $course : null,$apprentices,$capacity,$status !== '' ? $status : null,$competence,$batchId,(int)$existingId]);
                 } else {
@@ -196,7 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Throwable $ex) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        if ($ex instanceof PDOException && (string)$ex->getCode() === '23000') $errors[] = 'A importação encontrou um conflito de dados (por exemplo, código de origem duplicado). Confira o CSV e tente novamente.';
+        if ($ex instanceof PDOException && (string)$ex->getCode() === '23000') $errors[] = 'Conflito de integridade no banco; toda a transação foi desfeita. Verifique códigos duplicados, relações e campos obrigatórios. Detalhe técnico: ' . $ex->getMessage();
         else $errors[] = $ex->getMessage();
     }
 }
