@@ -34,13 +34,13 @@ function class_csv_read(string $path): array {
     arsort($delimiters);
     $delimiter = (string)array_key_first($delimiters);
     rewind($fh);
-    $header = fgetcsv($fh, 0, $delimiter, '"', '\\\\');
+    $header = fgetcsv($fh, 0, $delimiter, '"', '\\');
     if (!$header) { fclose($fh); throw new RuntimeException('Cabeçalho não encontrado.'); }
     $header[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string)$header[0]);
     $header = array_map(static fn($v) => trim((string)$v), $header);
     $rows = [];
     $line = 1;
-    while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\\\')) !== false) {
+    while (($row = fgetcsv($fh, 0, $delimiter, '"', '\\')) !== false) {
         $line++;
         if (count($row) === 1 && trim((string)$row[0]) === '') continue;
         $rows[] = ['line'=>$line, 'values'=>$row];
@@ -106,6 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pending = null;
             $messages[] = 'Prévia cancelada. Nenhuma turma foi importada.';
         } elseif ($action === 'confirm' && $pending && is_file((string)$pending['path'])) {
+            if (($_POST['confirm_mapping'] ?? '') !== '1') throw new RuntimeException('Marque a confirmação do mapeamento antes de importar.');
             $header = $pending['header'];
             $fields = ['source_code','name','course_name','subsede','polo','active_apprentices','capacity','status','competence'];
             $map = [];
@@ -155,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if ($poloName !== '') {
                     $poloFind->execute([$poloName]); $poloId = $poloFind->fetchColumn();
-                    if (!$poloId) { $poloAdd->execute([$poloName,$code !== '' ? $code : null]); $poloId = (int)$pdo->lastInsertId(); }
+                    if (!$poloId) { $poloAdd->execute([$poloName,$poloName]); $poloId = (int)$pdo->lastInsertId(); }
                     else $poloId = (int)$poloId;
                     if ($subId) {
                         $effective = $competence ?? date('Y-m-01');
