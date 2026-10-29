@@ -35,6 +35,7 @@ function page_header(string $title): void {
                 <a href="<?= e($base) ?>/units.php">Subsedes e polos</a>
                 <a href="<?= e($base) ?>/users.php">Usuários</a>
                 <a href="<?= e($base) ?>/costs.php">Custos</a>
+                <a href="<?= e($base) ?>/instructors.php">Instrutores e horas</a>
             </nav>
         <?php endif; ?>
 
