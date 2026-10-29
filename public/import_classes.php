@@ -76,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Verifica ambiguidades no banco existente antes de abrir a transação.
             $existingCodeCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE source_code = ?');
             $existingIdentityCount = $pdo->prepare('SELECT COUNT(*) FROM classes WHERE name = ? AND (polo_id <=> ?)');
+            $existingIdentityRows = $pdo->prepare('SELECT id, source_code FROM classes WHERE name = ? AND (polo_id <=> ?) ORDER BY id');
             $existingPoloId = $pdo->prepare('SELECT id FROM polos WHERE name = ? ORDER BY id');
             foreach ($parsed['rows'] as $item) {
                 $row = $item['values'];
