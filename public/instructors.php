@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/finance.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
 
@@ -60,9 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$check->fetch()) throw new RuntimeException('A subsede selecionada não está ativa.');
             }
             if ($id > 0) {
-                $check = $pdo->prepare('SELECT id FROM instructors WHERE id = ?');
+                $check = $pdo->prepare('SELECT id, subsede_id FROM instructors WHERE id = ?');
                 $check->execute([$id]);
-                if (!$check->fetch()) throw new RuntimeException('Instrutor não encontrado.');
+                $existingInstructor = $check->fetch();
+                if (!$existingInstructor) throw new RuntimeException('Instrutor não encontrado.');
+                $currentUnitId = $existingInstructor['subsede_id'] !== null ? (int)$existingInstructor['subsede_id'] : null;
+                if (!instructor_user_can_unit($isMaster, $allowedUnits, $currentUnitId)) {
+                    throw new RuntimeException('O instrutor não pertence a uma subsede autorizada para este usuário.');
+                }
                 $stmt = $pdo->prepare('UPDATE instructors SET source_code = ?, name = ?, subsede_id = ?, category = ?, position_name = ?, active = ? WHERE id = ?');
                 $stmt->execute([$code !== '' ? $code : null, $name, $unitId, $category !== '' ? $category : null, $position !== '' ? $position : null, $active, $id]);
                 audit($pdo, (int)$user['id'], 'update', 'instructor', $id, ['name'=>$name,'subsede_id'=>$unitId,'active'=>$active]);
@@ -164,7 +170,7 @@ $classSql = 'SELECT cl.id, cl.name, cl.course_name, cl.polo_id FROM classes cl';
 $classParams = [];
 if (!$isMaster) {
     if ($allowedUnits) {
-        $classSql .= ' WHERE EXISTS (SELECT 1 FROM polo_subsede_history h WHERE h.polo_id = cl.polo_id AND h.subsede_id IN (' . implode(',', array_fill(0, count($allowedUnits), '?')) . ') AND (h.valid_until IS NULL OR h.valid_until >= CURDATE()))';
+        $classSql .= ' WHERE EXISTS (SELECT 1 FROM polo_subsede_history h WHERE h.polo_id = cl.polo_id AND h.subsede_id IN (' . implode(',', array_fill(0, count($allowedUnits), '?')) . ') AND h.valid_from <= CURDATE() AND (h.valid_until IS NULL OR h.valid_until >= CURDATE()))';
         $classParams = $allowedUnits;
     } else $classSql .= ' WHERE 1 = 0';
 }
@@ -182,8 +188,14 @@ $sql = 'SELECT ih.id, ih.competence, ih.hours, ih.cost_per_hour, ih.cost_hour_in
 $params = [$start, $end];
 if (!$isMaster) {
     if ($allowedUnits) {
-        $sql .= ' AND i.subsede_id IN (' . implode(',', array_fill(0, count($allowedUnits), '?')) . ')';
-        array_push($params, ...$allowedUnits);
+        $unitPlaceholders = implode(',', array_fill(0, count($allowedUnits), '?'));
+        $sql .= ' AND i.subsede_id IN (' . $unitPlaceholders . ')
+            AND EXISTS (SELECT 1 FROM polo_subsede_history h
+                        WHERE h.polo_id = cl.polo_id
+                          AND h.subsede_id IN (' . $unitPlaceholders . ')
+                          AND h.valid_from <= ih.competence
+                          AND (h.valid_until IS NULL OR h.valid_until >= ih.competence))';
+        $params = array_merge($params, $allowedUnits, $allowedUnits);
     } else $sql .= ' AND 1 = 0';
 }
 $sql .= ' ORDER BY ih.competence DESC, i.name, cl.name';
@@ -191,8 +203,10 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $hourRows = $stmt->fetchAll();
 $money = static fn($v) => 'R$ ' . number_format((float)$v, 2, ',', '.');
-$totalHours = array_sum(array_map(static fn($r) => (float)$r['hours'], $hourRows));
-$totalCost = array_sum(array_map(static fn($r) => (float)$r['hours'] * (float)$r['cost_per_hour'], $hourRows));
+$instructionTotals = instruction_cost_totals($hourRows);
+$totalHours = $instructionTotals['hours'];
+$approvedCost = $instructionTotals['approved_cost'];
+$pendingCost = $instructionTotals['pending_cost'];
 page_header('Instrutores e horas');
 ?>
 <?php foreach ($messages as $m): ?><div class="notice"><?= e($m) ?></div><?php endforeach; ?>
@@ -253,7 +267,7 @@ page_header('Instrutores e horas');
 <section class="panel">
     <h2>Horas registradas na competência</h2>
     <form method="get" class="filters"><label>Competência<input type="month" name="competence" value="<?= e($month) ?>"></label><div style="align-self:end"><button type="submit">Consultar</button></div></form>
-    <p><strong><?= number_format($totalHours, 2, ',', '.') ?> horas</strong> · Custo calculado: <strong><?= e($money($totalCost)) ?></strong> · <?= count($hourRows) ?> lançamentos</p>
+    <p><strong><?= number_format($totalHours, 2, ',', '.') ?> horas registradas</strong> · Custo aprovado (considerado no dashboard): <strong><?= e($money($approvedCost)) ?></strong> · Pendente de aprovação: <strong><?= e($money($pendingCost)) ?></strong> · <?= count($hourRows) ?> lançamentos</p>
     <div style="overflow-x:auto"><table><thead><tr><th>Competência</th><th>Instrutor</th><th>Subsede</th><th>Turma</th><th>Horas</th><th>Custo/hora</th><th>Total</th><th>Encargos incluídos?</th><th>Status</th><?php if ($isMaster): ?><th>Ação</th><?php endif; ?></tr></thead><tbody>
     <?php if (!$hourRows): ?><tr><td colspan="<?= $isMaster ? 10 : 9 ?>">Nenhuma hora registrada nesta competência.</td></tr><?php endif; ?>
     <?php foreach ($hourRows as $h): ?><tr>

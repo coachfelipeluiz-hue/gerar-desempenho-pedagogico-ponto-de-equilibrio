@@ -23,7 +23,8 @@ Primeira base funcional em PHP + MySQL. Inclui login com sessão, estrutura de a
 - Não exponha `config/`, `database/` ou `storage/` no servidor público.
 - Altere imediatamente a senha inicial e use HTTPS em produção.
 - Cada requisição protegida revalida no banco se o usuário continua ativo e recarrega perfil e permissões; usuários desativados perdem a sessão.
-- Ações de instrutores exigem a permissão correspondente de criar/editar; aprovar horas permanece exclusivo do Master.
+- Ações de instrutores exigem a permissão correspondente de criar/editar e validam a unidade de origem/destino e o histórico da turma; aprovar horas permanece exclusivo do Master.
+- O resumo de instrutores separa custo aprovado, considerado no dashboard, de custo pendente de aprovação.
 - Usuários, unidades, custos e importações, por serem globais ou ainda sem autorização por unidade implementada, ficam restritos ao Master nesta etapa.
 - Acesso por unidade só vale dentro do intervalo `valid_from`–`valid_until`.
 - O módulo de importação nesta versão é apenas um ponto inicial: validar os cabeçalhos reais antes de confirmar importações em massa.
