@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace Gerar\\Finance;
+namespace Gerar\Finance;
 
 /**
  * Regras financeiras puras do domínio GERAR.
