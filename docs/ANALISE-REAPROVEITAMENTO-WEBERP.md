@@ -94,3 +94,37 @@ Este documento não conclui a licença aplicável a cada arquivo. Antes de copia
 - https://github.com/timschofield/webERP/blob/master/AnalysisHorizontalIncome.php
 - https://github.com/timschofield/webERP/blob/master/phpunit.dist.xml
 - https://www.weberp.org/
+
+
+## Resultado da revisão estática recebida por e-mail — 2026-10-29
+
+**Conclusão registrada:** não copiar código webERP nesta etapa. Reimplementar os padrões úteis no projeto GERAR, após revisão de requisitos, segurança e licença. Esta revisão foi estática; não houve execução de PHP ou testes funcionais do webERP.
+
+| Componente upstream | Observação da revisão | Decisão para GERAR |
+|---|---|---|
+| `AccountGroups.php` | Grupos hierárquicos, validação de duplicidade/ciclos e proteção de exclusão; fortemente acoplado a tabelas/globais e APIs DB_*; mistura SQL e HTML e foi apontada concatenação de entradas em SQL. | Reimplementar categorias/taxonomia com IDs estáveis, validação e integridade referencial; não copiar o arquivo. |
+| `AnalysisHorizontalIncome.php` | Comparação entre períodos, variações absolutas/relativas e drill-down; depende do modelo contábil webERP e convenções de sinal. | Criar serviço próprio de comparação por competência, subsede, polo e turma. |
+| `AuditTrail.php` | Consulta de eventos, mas com interpretação de SQL bruto armazenado e dependência de sessão. | Criar eventos estruturados e append-only; não armazenar/interpretar SQL bruto como trilha de auditoria. |
+| `AuditScripts.php` / `AuditScriptsFunctions.php` | Telemetria de duração com dependências legadas; a revisão apontou SQL concatenado e escaping insuficiente. | Registrar duração, status, ator, contexto e erros com consultas parametrizadas e escaping contextual. |
+| `Z_ImportGLAccountGroups.php`, `ImportBankTrans.php`, `DefineImportBankTransClass.php` | Padrão de ingestão e revisão antes de postagem; importador usa parsing CSV simplista e depende do modelo contábil do ERP. | Pipeline GERAR com staging, parsing CSV adequado, validação por linha, prévia, idempotência, confirmação e resultado por linha. |
+| `PageSecurity.php`, `SecurityTokens.php`, `UserRolesBySecurityToken.php` | Catálogo de permissões e associações papel/recurso, com IDs fixos e dependências legadas. | Criar autorização server-side por papel, ação e unidade; negar por padrão quando a permissão não estiver definida. |
+| `phpunit.dist.xml` | Configuração pequena, mas ligada aos caminhos, schema e alvo HTTP do webERP. | Criar configuração de testes própria para GERAR, sem copiar caminhos/configurações do upstream. |
+
+### Decisão sobre licença
+A revisão informa que o README upstream declara GPL-2.0 e que não encontrou arquivo LICENSE/LICENCE/COPYING no commit da GERAR que examinou. Antes de incorporar qualquer código GPL, confirmar a licença vigente, os avisos por arquivo, as dependências e as obrigações de distribuição com o responsável competente. Esta nota não é aconselhamento jurídico. Enquanto isso, reutilizar conceitos e implementar código próprio.
+
+### Alternativas educacionais citadas para comparação, não selecionadas
+- Frappe Education / ERPNext: https://frappe.io/education
+- Gibbon Finance: https://gibbonedu.org/features/other/finance
+- OpenEduCat: https://openeducat.org/compare-editions/
+
+Nenhuma das alternativas foi demonstrada na revisão como pronta para todas as regras específicas da GERAR. Uma migração integral exigiria matriz de aderência, análise de dependências, licença, esforço de migração e lacunas funcionais.
+
+### Próximos passos recomendados
+1. Continuar a correção de segurança e importadores na aplicação existente.
+2. Implementar trilha de auditoria estruturada e telemetria mínima.
+3. Criar camada financeira própria, com categorias, lançamentos e fonte/competência rastreáveis.
+4. Criar testes próprios de fórmulas, permissões, escopo por unidade e importações.
+5. Só depois comparar custo/benefício de continuar a aplicação atual versus migrar para uma plataforma educacional.
+
+**Limites mantidos:** nenhuma cópia de código upstream, nenhuma alteração em `main`, nenhum merge/deploy e nenhum acesso ao banco de produção.
