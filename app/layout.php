@@ -45,6 +45,7 @@ function page_header(string $title): void {
         <?php if ($user): ?>
             <nav class="nav">
                 <a href="<?= e($base) ?>/index.php">Visão geral</a>
+                <a href="<?= e($base) ?>/classes.php">Turmas</a>
                 <details class="nav-menu">
                     <summary>Importar</summary>
                     <div class="nav-submenu">
