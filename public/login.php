@@ -1,11 +1,16 @@
-
 <?php
 require __DIR__ . '/../app/bootstrap.php';
-// Se já existe uma sessão autenticada, mantém o acesso.
-// Caso contrário, a página de login deve aparecer sem menus.
-if (!current_user()) {
+
+if (current_user()) {
+    if ($pdo instanceof PDO) {
+        refresh_current_user($pdo);
+    } else {
+        invalidate_current_user();
+    }
+} else {
     $_SESSION['user'] = null;
 }
+
 require __DIR__ . '/../app/layout.php';
 
 $error = '';
@@ -35,31 +40,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             password_verify($password, $user['password_hash'])
         ) {
             session_regenerate_id(true);
-
-            $modules = [];
-
-            if ($user['role'] !== 'master') {
-                $m = $pdo->prepare(
-                    'SELECT module_key
-                     FROM user_module_permissions
-                     WHERE user_id = ? AND can_view = 1'
-                );
-                $m->execute([(int)$user['id']]);
-                $modules = array_column($m->fetchAll(), 'module_key');
-            }
-
             $_SESSION['user'] = [
                 'id' => (int)$user['id'],
-                'name' => $user['name'],
-                'email' => $user['email'],
-                'role' => $user['role'],
-                'modules' => $modules,
+                'name' => (string)$user['name'],
+                'email' => (string)$user['email'],
+                'role' => (string)$user['role'],
             ];
 
-            audit($pdo, (int)$user['id'], 'login', 'user', (int)$user['id']);
-
-            header('Location: ' . $base . '/index.php');
-            exit;
+            if (refresh_current_user($pdo)) {
+                audit($pdo, (int)$user['id'], 'login', 'user', (int)$user['id']);
+                header('Location: ' . $base . '/index.php');
+                exit;
+            }
         }
     }
 

@@ -22,6 +22,10 @@ Primeira base funcional em PHP + MySQL. Inclui login com sessão, estrutura de a
 - Não use credenciais reais no GitHub.
 - Não exponha `config/`, `database/` ou `storage/` no servidor público.
 - Altere imediatamente a senha inicial e use HTTPS em produção.
+- Cada requisição protegida revalida no banco se o usuário continua ativo e recarrega perfil e permissões; usuários desativados perdem a sessão.
+- Ações de instrutores exigem a permissão correspondente de criar/editar; aprovar horas permanece exclusivo do Master.
+- Usuários, unidades, custos e importações, por serem globais ou ainda sem autorização por unidade implementada, ficam restritos ao Master nesta etapa.
+- Acesso por unidade só vale dentro do intervalo `valid_from`–`valid_until`.
 - O módulo de importação nesta versão é apenas um ponto inicial: validar os cabeçalhos reais antes de confirmar importações em massa.
 - Não carregar planilhas com dados pessoais em repositórios públicos.
 

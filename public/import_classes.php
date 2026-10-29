@@ -4,10 +4,10 @@ declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
-if (!can_access_module('imports')) {
+if (!is_master_user()) {
     http_response_code(403);
     page_header('Acesso negado');
-    echo '<div class="error">Você não tem permissão para importar turmas.</div>';
+    echo '<div class="error">Importações de turmas podem alterar dados de várias unidades e, até existir filtragem por unidade, ficam restritas ao Master.</div>';
     page_footer();
     exit;
 }

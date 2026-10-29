@@ -44,24 +44,28 @@ function page_header(string $title): void {
 
         <?php if ($user): ?>
             <nav class="nav">
-                <a href="<?= e($base) ?>/index.php">Visão geral</a>
-                <a href="<?= e($base) ?>/classes.php">Turmas</a>
-                <details class="nav-menu">
-                    <summary>Importar</summary>
-                    <div class="nav-submenu">
-                        <a href="<?= e($base) ?>/imports.php">Importar contratos</a>
-                        <a href="<?= e($base) ?>/import_classes.php">Importar turmas</a>
-                    </div>
-                </details>
-                <a href="<?= e($base) ?>/units.php">Subsedes e polos</a>
-                <a href="<?= e($base) ?>/users.php">Usuários</a>
-                <details class="nav-menu">
-                    <summary>Custos</summary>
-                    <div class="nav-submenu">
-                        <a href="<?= e($base) ?>/costs.php">Lançamentos e categorias</a>
-                        <a href="<?= e($base) ?>/instructors.php">Instrutores e horas</a>
-                    </div>
-                </details>
+                <?php if (can_access_module('dashboard')): ?><a href="<?= e($base) ?>/index.php">Visão geral</a><?php endif; ?>
+                <?php if (can_access_module('classes')): ?><a href="<?= e($base) ?>/classes.php">Turmas</a><?php endif; ?>
+                <?php if (is_master_user()): ?>
+                    <details class="nav-menu">
+                        <summary>Importar</summary>
+                        <div class="nav-submenu">
+                            <a href="<?= e($base) ?>/imports.php">Importar contratos</a>
+                            <a href="<?= e($base) ?>/import_classes.php">Importar turmas</a>
+                        </div>
+                    </details>
+                    <a href="<?= e($base) ?>/units.php">Subsedes e polos</a>
+                    <a href="<?= e($base) ?>/users.php">Usuários</a>
+                <?php endif; ?>
+                <?php if (is_master_user() || can_access_module('instructors')): ?>
+                    <details class="nav-menu">
+                        <summary>Custos</summary>
+                        <div class="nav-submenu">
+                            <?php if (is_master_user()): ?><a href="<?= e($base) ?>/costs.php">Lançamentos e categorias</a><?php endif; ?>
+                            <?php if (can_access_module('instructors')): ?><a href="<?= e($base) ?>/instructors.php">Instrutores e horas</a><?php endif; ?>
+                        </div>
+                    </details>
+                <?php endif; ?>
             </nav>
         <?php endif; ?>
 

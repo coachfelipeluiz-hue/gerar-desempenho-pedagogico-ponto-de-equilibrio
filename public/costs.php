@@ -6,10 +6,10 @@ require __DIR__ . '/../app/layout.php';
 require_login();
 
 $user = current_user();
-if (!can_access_module('costs')) {
+if (!is_master_user()) {
     http_response_code(403);
     page_header('Acesso negado');
-    echo '<div class="error">Você não tem permissão para acessar o módulo de custos.</div>';
+    echo '<div class="error">O módulo de custos ainda não tem regras de leitura e gravação por unidade para perfis não Master. Até essa definição, o acesso fica restrito ao Master.</div>';
     page_footer();
     exit;
 }

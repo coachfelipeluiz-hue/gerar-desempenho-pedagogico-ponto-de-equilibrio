@@ -26,6 +26,9 @@ $messages = [];
 $errors = [];
 $isMaster = ($user['role'] ?? '') === 'master';
 $allowedUnits = array_map('intval', user_unit_ids($pdo));
+$canCreateInstructor = can_perform_module_action('instructors', 'create');
+$canEditInstructor = can_perform_module_action('instructors', 'edit');
+$canManageHours = $canCreateInstructor || $canEditInstructor;
 
 function instructor_user_can_unit(bool $isMaster, array $allowedUnits, ?int $unitId): bool {
     if ($isMaster) return true;
@@ -38,6 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($_POST['action'] ?? '');
         if ($action === 'save_instructor') {
             $id = (int)($_POST['instructor_id'] ?? 0);
+            $permission = $id > 0 ? 'edit' : 'create';
+            if (!can_perform_module_action('instructors', $permission)) {
+                throw new RuntimeException('Você não tem permissão para cadastrar ou alterar instrutores.');
+            }
             $name = trim((string)($_POST['name'] ?? ''));
             $code = trim((string)($_POST['source_code'] ?? ''));
             $unitId = (int)($_POST['subsede_id'] ?? 0) ?: null;
@@ -68,6 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messages[] = 'Instrutor cadastrado.';
             }
         } elseif ($action === 'save_hours') {
+            if (!$canManageHours) throw new RuntimeException('Você não tem permissão para registrar ou alterar horas de instrução.');
             $instructorId = (int)($_POST['instructor_id'] ?? 0);
             $classId = (int)($_POST['class_id'] ?? 0);
             $competence = (string)($_POST['competence'] ?? date('Y-m'));
@@ -81,6 +89,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $competence)) throw new RuntimeException('Selecione uma competência válida.');
             if ($hours <= 0 || $hours > 744 || $cost < 0 || $cost > 1000000) throw new RuntimeException('Informe horas maiores que zero e um custo por hora válido.');
             if (mb_strlen($sourceNote) > 255) throw new RuntimeException('A observação deve ter até 255 caracteres.');
+            $competenceDate = $competence . '-01';
+            $existingHours = $pdo->prepare('SELECT id FROM instruction_hours WHERE instructor_id = ? AND class_id = ? AND competence = ?');
+            $existingHours->execute([$instructorId, $classId, $competenceDate]);
+            $permission = $existingHours->fetchColumn() ? 'edit' : 'create';
+            if (!can_perform_module_action('instructors', $permission)) {
+                throw new RuntimeException('Você não tem permissão para registrar ou alterar horas de instrução.');
+            }
             $stmt = $pdo->prepare('SELECT id, subsede_id FROM instructors WHERE id = ? AND active = 1');
             $stmt->execute([$instructorId]);
             $instructor = $stmt->fetch();
@@ -185,6 +200,7 @@ page_header('Instrutores e horas');
 
 <section class="panel">
     <h2>Cadastrar instrutor</h2>
+    <?php if ($canCreateInstructor): ?>
     <form method="post">
         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="save_instructor">
         <div class="filters">
@@ -199,11 +215,15 @@ page_header('Instrutores e horas');
             <div><button type="submit">Cadastrar instrutor</button></div>
         </div>
     </form>
+    <?php else: ?>
+    <p class="muted">Seu perfil não tem permissão para cadastrar instrutores.</p>
+    <?php endif; ?>
 </section>
 
 <section class="panel">
     <h2>Registrar horas de instrução</h2>
     <p>O registro é único por instrutor, turma e competência. Se você salvar novamente a mesma combinação, o registro será atualizado e voltará a ficar pendente de aprovação.</p>
+    <?php if ($canManageHours): ?>
     <form method="post">
         <input type="hidden" name="csrf_token" value="<?= e($csrf) ?>"><input type="hidden" name="action" value="save_hours">
         <div class="filters">
@@ -217,6 +237,9 @@ page_header('Instrutores e horas');
             <div><button type="submit">Registrar horas</button></div>
         </div>
     </form>
+    <?php else: ?>
+    <p class="muted">Seu perfil não tem permissão para registrar ou alterar horas de instrução.</p>
+    <?php endif; ?>
 </section>
 
 <section class="panel">

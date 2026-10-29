@@ -3,8 +3,8 @@ declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 require __DIR__ . '/../app/layout.php';
 require_login();
-if (!can_access_module('imports') && (current_user()['role'] ?? '') !== 'master') {
-    http_response_code(403); page_header('Acesso negado'); echo '<div class="error">Você não tem permissão para acessar importações.</div>'; page_footer(); exit;
+if (!is_master_user()) {
+    http_response_code(403); page_header('Acesso negado'); echo '<div class="error">Importações de contratos podem alterar várias subsedes e, até existir filtragem por unidade, ficam restritas ao Master.</div>'; page_footer(); exit;
 }
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 if (empty($_SESSION['csrf_import'])) $_SESSION['csrf_import'] = bin2hex(random_bytes(32));

@@ -117,6 +117,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($role === 'consulta') {
                     $create = $edit = $import = $export = 0;
                 }
+                if (!$view) {
+                    $create = $edit = $import = $export = 0;
+                }
+                if ($role !== 'master' && in_array($key, ['imports', 'units', 'users', 'costs'], true)) {
+                    $view = $create = $edit = $import = $export = 0;
+                }
                 if ($view || $create || $edit || $import || $export) {
                     $insertModule->execute([$targetId, $key, $view, $create, $edit, $import, $export]);
                 }
@@ -244,7 +250,7 @@ page_header('Usuários e permissões');
         </div>
 
         <h3>Permissões por módulo</h3>
-        <p class="muted">“Visualizar” libera o módulo no acesso do usuário. “Consulta” não recebe permissões de alteração, importação ou exportação.</p>
+        <p class="muted">“Visualizar” é obrigatório para qualquer outra ação. “Consulta” não recebe permissões de alteração, importação ou exportação. Importações, unidades, usuários e custos permanecem exclusivos do Master nesta etapa.</p>
         <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse">
                 <thead><tr>

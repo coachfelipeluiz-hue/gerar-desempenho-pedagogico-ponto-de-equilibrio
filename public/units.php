@@ -6,10 +6,10 @@ require __DIR__ . '/../app/layout.php';
 require_login();
 
 $user = current_user();
-if (!can_access_module('units') && ($user['role'] ?? '') !== 'master') {
+if (!is_master_user()) {
     http_response_code(403);
     page_header('Acesso negado');
-    echo '<div class="error">Você não tem permissão para gerenciar unidades.</div>';
+    echo '<div class="error">Somente o Master pode consultar ou alterar o cadastro global de subsedes, polos e vínculos históricos.</div>';
     page_footer();
     exit;
 }

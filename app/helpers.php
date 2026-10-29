@@ -6,7 +6,8 @@ function e(?string $value): string {
 }
 
 function current_user(): ?array {
-    return $_SESSION['user'] ?? null;
+    $user = $_SESSION['user'] ?? null;
+    return is_array($user) ? $user : null;
 }
 
 function app_base_path(): string {
@@ -24,11 +25,95 @@ function app_base_path(): string {
     return '';
 }
 
+function invalidate_current_user(): void {
+    unset($_SESSION['user']);
+
+    if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+        session_regenerate_id(true);
+    }
+}
+
+function refresh_current_user(PDO $pdo): bool {
+    $sessionUser = current_user();
+    $userId = (int)($sessionUser['id'] ?? 0);
+    if ($userId < 1) {
+        invalidate_current_user();
+        return false;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, name, email, role, active
+         FROM users
+         WHERE id = ?
+         LIMIT 1'
+    );
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+
+    if (!$user || (int)$user['active'] !== 1) {
+        invalidate_current_user();
+        return false;
+    }
+
+    $permissionStmt = $pdo->prepare(
+        'SELECT module_key, can_view, can_create, can_edit, can_import, can_export
+         FROM user_module_permissions
+         WHERE user_id = ?'
+    );
+    $permissionStmt->execute([$userId]);
+
+    $permissions = [];
+    foreach ($permissionStmt->fetchAll() as $permission) {
+        $module = (string)$permission['module_key'];
+        $permissions[$module] = [
+            'can_view' => (int)$permission['can_view'] === 1,
+            'can_create' => (int)$permission['can_create'] === 1,
+            'can_edit' => (int)$permission['can_edit'] === 1,
+            'can_import' => (int)$permission['can_import'] === 1,
+            'can_export' => (int)$permission['can_export'] === 1,
+        ];
+    }
+
+    $modules = [];
+    foreach ($permissions as $module => $permission) {
+        if ($permission['can_view']) {
+            $modules[] = $module;
+        }
+    }
+
+    $_SESSION['user'] = [
+        'id' => (int)$user['id'],
+        'name' => (string)$user['name'],
+        'email' => (string)$user['email'],
+        'role' => (string)$user['role'],
+        'modules' => $modules,
+        'permissions' => $permissions,
+    ];
+
+    return true;
+}
+
 function require_login(): void {
     if (!current_user()) {
         header('Location: ' . app_base_path() . '/login.php');
         exit;
     }
+
+    global $pdo;
+    if (!($pdo instanceof PDO)) {
+        invalidate_current_user();
+        http_response_code(503);
+        exit('Não foi possível validar sua sessão. Tente novamente quando o banco estiver disponível.');
+    }
+
+    if (!refresh_current_user($pdo)) {
+        header('Location: ' . app_base_path() . '/login.php');
+        exit;
+    }
+}
+
+function is_master_user(): bool {
+    return (current_user()['role'] ?? '') === 'master';
 }
 
 function can_access_module(string $module): bool {
@@ -42,7 +127,31 @@ function can_access_module(string $module): bool {
         return true;
     }
 
-    return in_array($module, $user['modules'] ?? [], true);
+    return !empty($user['permissions'][$module]['can_view']);
+}
+
+function can_perform_module_action(string $module, string $action): bool {
+    $permissionField = match ($action) {
+        'create' => 'can_create',
+        'edit' => 'can_edit',
+        'import' => 'can_import',
+        'export' => 'can_export',
+        default => null,
+    };
+
+    $user = current_user();
+    if (!$user || $permissionField === null) {
+        return false;
+    }
+
+    if (($user['role'] ?? '') === 'master') {
+        return true;
+    }
+
+    $permissions = $user['permissions'][$module] ?? null;
+    return is_array($permissions)
+        && !empty($permissions['can_view'])
+        && !empty($permissions[$permissionField]);
 }
 
 function user_unit_ids(PDO $pdo): array {
@@ -60,7 +169,8 @@ function user_unit_ids(PDO $pdo): array {
         'SELECT subsede_id
          FROM user_unit_access
          WHERE user_id = ?
-           AND (valid_until IS NULL OR valid_until >= CURDATE())'
+           AND valid_from <= CURRENT_DATE
+           AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)'
     );
 
     $stmt->execute([(int)$user['id']]);
